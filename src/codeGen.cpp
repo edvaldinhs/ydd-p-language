@@ -114,3 +114,47 @@ llvm::Function *FunctionAST::codegen() {
   TheFunction->eraseFromParent();
   return nullptr;
 }
+
+llvm::Value *IfExprAST::codegen() {
+  llvm::Value *CondV = Cond->codegen();
+  if (!CondV)
+    return nullptr;
+
+  CondV = TheBuilder->CreateFCmpONE(
+      CondV, llvm::ConstantFP::get(*TheContext, llvm::APFloat(0.0)), "ifcond");
+
+  llvm::Function *TheFunction = TheBuilder->GetInsertBlock()->getParent();
+
+  llvm::BasicBlock *ThenBB =
+      llvm::BasicBlock::Create(*TheContext, "then", TheFunction);
+  llvm::BasicBlock *ElseBB = llvm::BasicBlock::Create(*TheContext, "else");
+  llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(*TheContext, "ifcont");
+
+  TheBuilder->CreateCondBr(CondV, ThenBB, ElseBB);
+
+  TheBuilder->SetInsertPoint(ThenBB);
+  llvm::Value *ThenV = Then->codegen();
+  if (!ThenV)
+    return nullptr;
+  TheBuilder->CreateBr(MergeBB);
+
+  ThenBB = TheBuilder->GetInsertBlock();
+
+  TheFunction->insert(TheFunction->end(), ElseBB);
+  TheBuilder->SetInsertPoint(ElseBB);
+  llvm::Value *ElseV = Else->codegen();
+  if (!ElseV)
+    return nullptr;
+  TheBuilder->CreateBr(MergeBB);
+
+  ElseBB = TheBuilder->GetInsertBlock();
+
+  TheFunction->insert(TheFunction->end(), MergeBB);
+  TheBuilder->SetInsertPoint(MergeBB);
+  llvm::PHINode *PN =
+      TheBuilder->CreatePHI(llvm::Type::getDoubleTy(*TheContext), 2, "iftmp");
+
+  PN->addIncoming(ThenV, ThenBB);
+  PN->addIncoming(ElseV, ElseBB);
+  return PN;
+}

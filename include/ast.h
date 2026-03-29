@@ -64,7 +64,6 @@ public:
   llvm::Value *codegen() override;
 };
 
-// Captures the "header" of a function (name and args)
 class PrototypeAST {
   std::string Name;
   std::vector<std::string> Args;
@@ -76,7 +75,6 @@ public:
   llvm::Function *codegen();
 };
 
-// Captures the prototype and the body code
 class FunctionAST {
   std::unique_ptr<PrototypeAST> Proto;
   std::unique_ptr<ExprAST> Body;
@@ -86,6 +84,17 @@ public:
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
   llvm::Function *codegen();
+};
+
+class IfExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Cond, Then, Else;
+
+public:
+  IfExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Then,
+            std::unique_ptr<ExprAST> Else)
+      : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
+
+  llvm::Value *codegen() override;
 };
 
 #endif // !AST_H
