@@ -2,6 +2,10 @@
 #include "../include/lexer.h"
 #include "../include/parser.h"
 
+#include "llvm/ExecutionEngine/Orc/LLJIT.h"
+#include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
+#include "llvm/Support/TargetSelect.h"
+
 #include "llvm/Support/raw_ostream.h"
 #include <iostream>
 
@@ -10,15 +14,20 @@ extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
 
 int main() {
+
   SetupPrecedence();
+  llvm::InitializeNativeTarget();
+  llvm::InitializeNativeTargetAsmPrinter();
+  llvm::InitializeNativeTargetAsmParser();
 
   TheContext = std::make_unique<llvm::LLVMContext>();
-  TheModule = std::make_unique<llvm::Module>("MyLangJIT", *TheContext);
+  TheModule = std::make_unique<llvm::Module>("JIT", *TheContext);
   TheBuilder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
 
-  std::cout << "Ready! Type 'def' to start a function (e.g., def foo(x) x+1) "
-               "or press Ctrl+D."
-            << std::endl;
+  auto ExitOnErr = llvm::ExitOnError();
+  auto TheJIT = ExitOnErr(llvm::orc::LLJITBuilder().create());
+
+  std::cout << "Wellcome to Yde compiler!" << std::endl;
   std::cout << ">> ";
 
   getNextToken();
@@ -43,11 +52,22 @@ int main() {
       break;
     }
     default:
-      if (auto ExprAST = ParseExpression()) {
-        if (auto *ExprIR = ExprAST->codegen()) {
-          std::cout << "Read expression:" << std::endl;
-          ExprIR->print(llvm::errs());
-          std::cerr << "\n";
+      if (auto FnAST = ParseTopLevelExpr()) {
+        if (auto *FnIR = FnAST->codegen()) {
+
+          auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule),
+                                                 std::move(TheContext));
+          ExitOnErr(TheJIT->addIRModule(std::move(TSM)));
+
+          auto ExprSymbol = ExitOnErr(TheJIT->lookup("__anon_expr"));
+
+          double (*FP)() = ExprSymbol.toPtr<double (*)()>();
+
+          fprintf(stderr, "Evaluated to: %f\n", FP());
+
+          TheContext = std::make_unique<llvm::LLVMContext>();
+          TheModule = std::make_unique<llvm::Module>("JIT", *TheContext);
+          TheBuilder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
         }
       } else {
         getNextToken();

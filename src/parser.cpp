@@ -69,6 +69,33 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
   return V;
 }
 
+static std::unique_ptr<ExprAST> ParseIfExpr() {
+  getNextToken();
+
+  auto Cond = ParseExpression();
+  if (!Cond)
+    return nullptr;
+
+  if (CurTok != tok_then)
+    return nullptr;
+  getNextToken();
+
+  auto Then = ParseExpression();
+  if (!Then)
+    return nullptr;
+
+  if (CurTok != tok_else)
+    return nullptr;
+  getNextToken();
+
+  auto Else = ParseExpression();
+  if (!Else)
+    return nullptr;
+
+  return std::make_unique<IfExprAST>(std::move(Cond), std::move(Then),
+                                     std::move(Else));
+}
+
 /// primary
 ///   ::= identifierexpr
 ///   ::= numberexpr
@@ -81,6 +108,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return ParseIdentifierExpr();
   case tok_number:
     return ParseNumberExpr();
+  case tok_if:
+    return ParseIfExpr();
   case '(':
     return ParseParenExpr();
   }
@@ -154,6 +183,15 @@ std::unique_ptr<FunctionAST> ParseDefinition() {
 
   if (auto E = ParseExpression())
     return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  return nullptr;
+}
+
+std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+  if (auto E = ParseExpression()) {
+    auto Proto = std::make_unique<PrototypeAST>("__anon_expr",
+                                                std::vector<std::string>());
+    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  }
   return nullptr;
 }
 

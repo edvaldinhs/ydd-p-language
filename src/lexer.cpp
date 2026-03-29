@@ -14,10 +14,16 @@ int gettok() {
     while (isalnum((LastChar = getchar())))
       IdentifierStr += LastChar;
 
-    if (IdentifierStr == "def")
+    if (IdentifierStr == "f")
       return tok_def;
     if (IdentifierStr == "extern")
       return tok_extern;
+    if (IdentifierStr == "i")
+      return tok_if;
+    if (IdentifierStr == "t")
+      return tok_then;
+    if (IdentifierStr == "e")
+      return tok_else;
     return tok_identifier;
   }
 
