@@ -158,3 +158,62 @@ llvm::Value *IfExprAST::codegen() {
   PN->addIncoming(ElseV, ElseBB);
   return PN;
 }
+
+llvm::Value *ForExprAST::codegen() {
+  llvm::Value *StartVal = Start->codegen();
+  if (!StartVal)
+    return nullptr;
+
+  llvm::Function *TheFunction = TheBuilder->GetInsertBlock()->getParent();
+  llvm::BasicBlock *PreheaderBB = TheBuilder->GetInsertBlock();
+  llvm::BasicBlock *LoopBB =
+      llvm::BasicBlock::Create(*TheContext, "loop", TheFunction);
+
+  TheBuilder->CreateBr(LoopBB);
+  TheBuilder->SetInsertPoint(LoopBB);
+
+  llvm::PHINode *Variable =
+      TheBuilder->CreatePHI(llvm::Type::getDoubleTy(*TheContext), 2, VarName);
+  Variable->addIncoming(StartVal, PreheaderBB);
+
+  llvm::Value *OldVal = NamedValues[VarName];
+  NamedValues[VarName] = Variable;
+
+  if (!Body->codegen())
+    return nullptr;
+
+  llvm::Value *StepVal = nullptr;
+  if (Step) {
+    StepVal = Step->codegen();
+    if (!StepVal)
+      return nullptr;
+  } else {
+    StepVal = llvm::ConstantFP::get(*TheContext, llvm::APFloat(1.0));
+  }
+
+  llvm::Value *NextVar = TheBuilder->CreateFAdd(Variable, StepVal, "nextvar");
+
+  llvm::Value *EndCond = End->codegen();
+  if (!EndCond)
+    return nullptr;
+
+  EndCond = TheBuilder->CreateFCmpONE(
+      EndCond, llvm::ConstantFP::get(*TheContext, llvm::APFloat(0.0)),
+      "loopcond");
+
+  llvm::BasicBlock *LoopEndBB = TheBuilder->GetInsertBlock();
+  llvm::BasicBlock *AfterBB =
+      llvm::BasicBlock::Create(*TheContext, "afterloop", TheFunction);
+
+  TheBuilder->CreateCondBr(EndCond, LoopBB, AfterBB);
+  TheBuilder->SetInsertPoint(AfterBB);
+
+  Variable->addIncoming(NextVar, LoopEndBB);
+
+  if (OldVal)
+    NamedValues[VarName] = OldVal;
+  else
+    NamedValues.erase(VarName);
+
+  return llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
+}

@@ -40,8 +40,8 @@ You will need to download llvm libs before building the project...
 Clone the project and access the project folder:
 
 ```bash
-$ git clone https://github.com/edvaldinhs/ydd-language
-$ cd ydd-language
+$ git clone https://github.com/edvaldinhs/yde-language
+$ cd yde-language
 ```
 
 Then build the project:
@@ -51,7 +51,7 @@ $ mkdir build
 $ cd build
 $ cmake ..
 $ make
-$ ./ydd
+$ ./yde
 ```
 
 <br>
