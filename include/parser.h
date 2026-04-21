@@ -13,6 +13,8 @@ extern std::map<char, int> BinopPrecedence;
 int getNextToken();
 void SetupPrecedence();
 
+int PeekToken(size_t n);
+
 std::unique_ptr<ExprAST> ParseExpression();
 std::unique_ptr<FunctionAST> ParseDefinition();
 std::unique_ptr<PrototypeAST> ParseExtern();

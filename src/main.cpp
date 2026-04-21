@@ -126,27 +126,36 @@ int main(int argc, char **argv) {
       getNextToken();
       break;
     case tok_def:
-      if (auto FnAST = ParseDefinition()) {
+      if (auto FnAST = ParseDefinition())
         FnAST->codegen();
-      }
+      else
+        getNextToken();
       break;
     case tok_extern:
-      if (auto ProtoAST = ParseExtern()) {
+      if (auto ProtoAST = ParseExtern())
         ProtoAST->codegen();
-      }
+      else
+        getNextToken();
       break;
     case tok_int:
     case tok_double:
-      if (auto GlobalAST = ParseGlobal()) {
+      if (auto GlobalAST = ParseGlobal())
         GlobalAST->codegen();
+      break;
+    case tok_identifier:
+      if (PeekToken(0) == ':') {
+        if (auto GlobalAST = ParseGlobal())
+          GlobalAST->codegen();
+      } else {
+        if (auto FnAST = ParseTopLevelExpr())
+          FnAST->codegen();
       }
       break;
     default:
-      if (auto FnAST = ParseTopLevelExpr()) {
+      if (auto FnAST = ParseTopLevelExpr())
         FnAST->codegen();
-      } else {
+      else
         getNextToken();
-      }
       break;
     }
   }

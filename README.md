@@ -1,6 +1,6 @@
 <p id="title" align="center">
   <a href="#title">
-    <img width="240" height="240" src="https://i.imgur.com/G6R78PP.png" height="128">
+    <img width="240" src="https://i.imgur.com/G6R78PP.png">
     <h1 align="center">Yde Programming Language</h1>
   </a>
 </p>

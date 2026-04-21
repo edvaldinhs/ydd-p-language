@@ -3,16 +3,27 @@
 std::string IdentifierStr;
 double NumVal;
 
+int CurLine = 1;
+int CurCol = 0;
+
 int gettok() {
   static int LastChar = ' ';
 
-  while (isspace(LastChar))
+  while (isspace(LastChar)) {
+    if (LastChar == '\n') {
+      CurLine++;
+      CurCol = 0;
+    }
     LastChar = getchar();
+    CurCol++;
+  }
 
   if (isalpha(LastChar)) {
     IdentifierStr = LastChar;
-    while (isalnum((LastChar = getchar())))
+    while (isalnum((LastChar = getchar()))) {
       IdentifierStr += LastChar;
+      CurCol++;
+    }
 
     if (IdentifierStr == "fun")
       return tok_def;
@@ -37,7 +48,10 @@ int gettok() {
 
   if (isdigit(LastChar) || LastChar == '.') {
     std::string NumStr;
+    bool isFP = false;
     do {
+      if (LastChar == '.')
+        isFP = true;
       NumStr += LastChar;
       LastChar = getchar();
     } while (isdigit(LastChar) || LastChar == '.');

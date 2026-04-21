@@ -40,14 +40,12 @@ llvm::Value *EmitCast(llvm::Value *V, llvm::Type *DestTy) {
     return V;
 
   // 2 to 2.0
-  if (SrcTy->isIntegerTy() && DestTy->isDoubleTy()) {
-    return TheBuilder->CreateSIToFP(V, DestTy, "promotion");
-  }
+  if (SrcTy->isIntegerTy() && DestTy->isDoubleTy())
+    return TheBuilder->CreateSIToFP(V, DestTy, "itofp");
 
   // 2.5 to 2
-  if (SrcTy->isDoubleTy() && DestTy->isIntegerTy()) {
-    return TheBuilder->CreateFPToSI(V, DestTy, "demotion");
-  }
+  if (SrcTy->isDoubleTy() && DestTy->isIntegerTy())
+    return TheBuilder->CreateFPToSI(V, DestTy, "fptosi");
 
   return V;
 }
@@ -61,12 +59,16 @@ static llvm::AllocaInst *CreateEntryBlockAlloca(llvm::Function *TheFunction,
 }
 
 llvm::Value *NumberExprAST::codegen() {
+  if (Val == static_cast<int64_t>(Val)) {
+    return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext),
+                                  static_cast<int64_t>(Val));
+  }
   return llvm::ConstantFP::get(*TheContext, llvm::APFloat(Val));
 }
 
 llvm::Value *VariableExprAST::codegen() {
   if (llvm::Value *V = NamedValues[Name]) {
-    llvm::AllocaInst *Alloca = llvm::cast<llvm::AllocaInst>(V);
+    auto *Alloca = llvm::cast<llvm::AllocaInst>(V);
     return TheBuilder->CreateLoad(Alloca->getAllocatedType(), V, Name.c_str());
   }
 
@@ -165,14 +167,22 @@ llvm::Value *BinaryExprAST::codegen() {
     if (!Val)
       return nullptr;
 
+    llvm::Type *VarTy = nullptr;
     llvm::Value *Variable = NamedValues[LHSE->getName()];
-    if (!Variable) {
-      Variable = TheModule->getNamedGlobal(LHSE->getName());
+
+    if (Variable) {
+      // Local variable
+      VarTy = llvm::cast<llvm::AllocaInst>(Variable)->getAllocatedType();
+    } else if (auto *GV = TheModule->getNamedGlobal(LHSE->getName())) {
+      // Global variable
+      Variable = GV;
+      VarTy = GV->getValueType();
     }
 
     if (!Variable)
       return LogErrorV("Unknown variable name");
 
+    Val = EmitCast(Val, VarTy);
     TheBuilder->CreateStore(Val, Variable);
     return Val;
   }
@@ -207,9 +217,6 @@ llvm::Function *PrototypeAST::codegen() {
 
   llvm::FunctionType *FT =
       llvm::FunctionType::get(getLLVMType(RetType), ArgTypes, false);
-
-  std::vector<llvm::Type *> Doubles(Args.size(),
-                                    llvm::Type::getDoubleTy(*TheContext));
 
   llvm::Function *F = llvm::Function::Create(
       FT, llvm::Function::ExternalLinkage, Name, TheModule.get());

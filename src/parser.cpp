@@ -1,4 +1,5 @@
 #include "../include/parser.h"
+#include <deque>
 #include <memory>
 
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
@@ -8,11 +9,95 @@ extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
 int CurTok;
 std::map<char, int> BinopPrecedence;
 
-int getNextToken() { return CurTok = gettok(); }
+extern int CurLine;
+extern int CurCol;
 
-std::unique_ptr<ExprAST> LogError(const char *Str) {
-  fprintf(stderr, "Error: %s\n", Str);
+// --- Token Management ---
+
+std::deque<int> TokenBuffer;
+std::deque<std::string> IdBuffer;
+
+int AdvanceToken() {
+  if (TokenBuffer.empty()) {
+    CurTok = gettok();
+  } else {
+    CurTok = TokenBuffer.front();
+    IdentifierStr = IdBuffer.front();
+    TokenBuffer.pop_front();
+    IdBuffer.pop_front();
+  }
+  return CurTok;
+}
+
+int getNextToken() { return AdvanceToken(); }
+
+int PeekToken(size_t n = 0) {
+  while (TokenBuffer.size() <= n) {
+    TokenBuffer.push_back(gettok());
+    IdBuffer.push_back(IdentifierStr);
+  }
+  return TokenBuffer[n];
+}
+
+// --- Error Handling ---
+
+std::string getTokenName(int tok) {
+  switch (tok) {
+  case tok_eof:
+    return "EOF";
+  case tok_def:
+    return "fun";
+  case tok_extern:
+    return "extern";
+  case tok_identifier:
+    return "identifier";
+  case tok_number:
+    return "number";
+  case tok_if:
+    return "if";
+  case tok_then:
+    return "then";
+  case tok_else:
+    return "else";
+  case tok_for:
+    return "for";
+  case tok_in:
+    return "in";
+  case tok_int:
+    return "int";
+  case tok_double:
+    return "double";
+  default:
+    if (isascii(tok))
+      return std::string(1, (char)tok);
+    return "unknown token (" + std::to_string(tok) + ")";
+  }
+}
+
+std::unique_ptr<ExprAST> LogError(const std::string &Msg) {
+  fprintf(stderr, "Error [Line %d, Col %d]: %s\n", CurLine, CurCol,
+          Msg.c_str());
   return nullptr;
+}
+
+bool Expect(int ExpectedTok, const std::string &Context) {
+  if (CurTok == ExpectedTok) {
+    getNextToken();
+    return true;
+  }
+
+  std::string ErrorMsg =
+      "Expected '" + getTokenName(ExpectedTok) + "' " + Context;
+  ErrorMsg += ". Found '" + getTokenName(CurTok) + "' instead";
+
+  if (CurTok == tok_identifier)
+    ErrorMsg += " (\"" + IdentifierStr + "\")";
+
+  if (CurTok == tok_identifier && ExpectedTok == tok_then)
+    ErrorMsg += " (Hint: check for missing 'then')";
+
+  LogError(ErrorMsg);
+  return false;
 }
 
 static int GetTokPrecedence() {
@@ -44,8 +129,7 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
   if (CurTok == ':') {
     getNextToken();
     TypeKind Ty = ParseType();
-
-    std::unique_ptr<ExprAST> Init;
+    std::unique_ptr<ExprAST> Init = nullptr;
     if (CurTok == '=') {
       getNextToken();
       Init = ParseExpression();
@@ -53,38 +137,74 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     return std::make_unique<VarExprAST>(IdName, Ty, std::move(Init));
   }
 
-  if (CurTok != '(')
-    return std::make_unique<VariableExprAST>(IdName);
+  if (CurTok == '(') {
+    getNextToken();
+    std::vector<std::unique_ptr<ExprAST>> Args;
+    if (CurTok != ')') {
+      while (true) {
+        if (auto Arg = ParseExpression())
+          Args.push_back(std::move(Arg));
+        else
+          return nullptr;
 
-  getNextToken();
-  std::vector<std::unique_ptr<ExprAST>> Args;
-  if (CurTok != ')') {
-    while (true) {
-      if (auto Arg = ParseExpression())
-        Args.push_back(std::move(Arg));
-      else
-        return nullptr;
-
-      if (CurTok == ')')
-        break;
-      if (CurTok != ',')
-        return nullptr;
-      getNextToken();
+        if (CurTok == ')')
+          break;
+        if (!Expect(',', "between function arguments"))
+          return nullptr;
+      }
     }
+    getNextToken();
+    return std::make_unique<CallExprAST>(IdName, std::move(Args));
   }
-  getNextToken();
-  return std::make_unique<CallExprAST>(IdName, std::move(Args));
+
+  return std::make_unique<VariableExprAST>(IdName);
 }
 
-std::unique_ptr<GlobalVarAST> ParseGlobal() {
-  TypeKind Ty = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
+static std::unique_ptr<ExprAST> ParseNumberExpr() {
+  auto Result = std::make_unique<NumberExprAST>(NumVal);
   getNextToken();
+  return Result;
+}
 
+std::unique_ptr<ExprAST> ParseVarExpr() {
+  TypeKind Ty = ParseType();
   if (CurTok != tok_identifier)
-    return nullptr;
+    return LogError("Expected identifier");
 
   std::string Name = IdentifierStr;
   getNextToken();
+
+  std::unique_ptr<ExprAST> Init = nullptr;
+  if (CurTok == '=') {
+    getNextToken();
+    Init = ParseExpression();
+  }
+  return std::make_unique<VarExprAST>(Name, Ty, std::move(Init));
+}
+
+std::unique_ptr<GlobalVarAST> ParseGlobal() {
+  TypeKind Ty;
+  std::string Name;
+
+  if (CurTok == tok_int || CurTok == tok_double) {
+    Ty = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
+    getNextToken();
+    if (CurTok != tok_identifier) {
+      LogError("Expected identifier after type");
+      return nullptr;
+    }
+    Name = IdentifierStr;
+    getNextToken();
+  } else {
+    Name = IdentifierStr;
+    getNextToken();
+    if (CurTok != ':') {
+      LogError("Expected ':' after global identifier");
+      return nullptr;
+    }
+    getNextToken();
+    Ty = ParseType();
+  }
 
   double Val = 0;
   if (CurTok == '=') {
@@ -92,6 +212,8 @@ std::unique_ptr<GlobalVarAST> ParseGlobal() {
     if (CurTok == tok_number) {
       Val = NumVal;
       getNextToken();
+    } else {
+      LogError("Global initializer must be a numeric literal");
     }
   }
 
@@ -101,42 +223,14 @@ std::unique_ptr<GlobalVarAST> ParseGlobal() {
   return std::make_unique<GlobalVarAST>(Name, Ty, Val);
 }
 
-static std::unique_ptr<ExprAST> ParseNumberExpr() {
-  auto Result = std::make_unique<NumberExprAST>(NumVal);
-  getNextToken();
-  return std::move(Result);
-}
-
-static std::unique_ptr<ExprAST> ParseVarExpr() {
-  TypeKind Ty = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
-  getNextToken();
-
-  if (CurTok != tok_identifier)
-    return LogError("expected identifier after type");
-
-  std::string Name = IdentifierStr;
-  getNextToken();
-
-  std::unique_ptr<ExprAST> Init;
-  if (CurTok == '=') {
-    getNextToken();
-    Init = ParseExpression();
-    if (!Init)
-      return nullptr;
-  }
-
-  return std::make_unique<VarExprAST>(Name, Ty, std::move(Init));
-}
-
 static std::unique_ptr<ExprAST> ParseParenExpr() {
   getNextToken();
   auto V = ParseExpression();
   if (!V)
     return nullptr;
 
-  if (CurTok != ')')
+  if (!Expect(')', "to close expression"))
     return nullptr;
-  getNextToken();
   return V;
 }
 
@@ -147,18 +241,14 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
   if (!Cond)
     return nullptr;
 
-  if (CurTok != tok_then)
+  if (!Expect(tok_then, "after 'if' condition"))
     return nullptr;
-  getNextToken();
-
   auto Then = ParseExpression();
   if (!Then)
     return nullptr;
 
-  if (CurTok != tok_else)
+  if (!Expect(tok_else, "to complete 'if'"))
     return nullptr;
-  getNextToken();
-
   auto Else = ParseExpression();
   if (!Else)
     return nullptr;
@@ -166,24 +256,25 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
   return std::make_unique<IfExprAST>(std::move(Cond), std::move(Then),
                                      std::move(Else));
 }
+
 static std::unique_ptr<ExprAST> ParseForExpr() {
   getNextToken();
 
   if (CurTok != tok_identifier)
-    return nullptr;
+    return LogError("Expected identifier after 'for'");
+
   std::string IdName = IdentifierStr;
   getNextToken();
 
-  if (CurTok != '=')
+  if (!Expect('=', "after for-loop identifier"))
     return nullptr;
-  getNextToken();
 
   auto Start = ParseExpression();
   if (!Start)
     return nullptr;
-  if (CurTok != ',')
+
+  if (!Expect(',', "after for-loop start value"))
     return nullptr;
-  getNextToken();
 
   auto End = ParseExpression();
   if (!End)
@@ -197,9 +288,8 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
       return nullptr;
   }
 
-  if (CurTok != tok_in)
+  if (!Expect(tok_in, "to begin for-loop body"))
     return nullptr;
-  getNextToken();
 
   auto Body = ParseExpression();
   if (!Body)
@@ -223,23 +313,13 @@ static std::unique_ptr<ExprAST> ParseBlockExpr() {
       getNextToken();
   }
 
-  if (CurTok != '}') {
-    fprintf(stderr, "Expected '}' at end of block\n");
+  if (!Expect('}', "at end of block"))
     return nullptr;
-  }
-
-  getNextToken();
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
-/// primary
-///   ::= identifierexpr
-///   ::= numberexpr
-///   ::= parenexpr
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
-  default:
-    return nullptr;
   case tok_identifier:
     return ParseIdentifierExpr();
   case tok_number:
@@ -255,16 +335,18 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return ParseBlockExpr();
   case '(':
     return ParseParenExpr();
+  default:
+    return LogError("Unknown token '" + getTokenName(CurTok) +
+                    "' when expecting an expression");
   }
 }
 
 // --- Logic for Binary Expressions ---
-///   ::= ('+' primary)*
+
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                                               std::unique_ptr<ExprAST> LHS) {
   while (true) {
     int TokPrec = GetTokPrecedence();
-
     if (TokPrec < ExprPrec)
       return LHS;
 
@@ -277,13 +359,11 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 
     int NextPrec = GetTokPrecedence();
     if (TokPrec < NextPrec) {
-      // TokPrec +1 para 1 + 2 + 3 = (1 + 2) + 3
       RHS = ParseBinOpRHS(TokPrec + 1, std::move(RHS));
       if (!RHS)
         return nullptr;
     }
 
-    // Merge LHS/RHS.
     LHS =
         std::make_unique<BinaryExprAST>(BinOp, std::move(LHS), std::move(RHS));
   }
@@ -296,6 +376,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
   return ParseBinOpRHS(0, std::move(LHS));
 }
 
+// --- Logic for Functions/Globals ---
+
 static ArgInfo ParseArgument() {
   TypeKind SelectedType = TypeKind::Double;
   std::string SelectedName;
@@ -303,48 +385,43 @@ static ArgInfo ParseArgument() {
   if (CurTok == tok_int || CurTok == tok_double) {
     SelectedType = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
     getNextToken();
-
-    if (CurTok != tok_identifier)
+    if (CurTok != tok_identifier) {
+      LogError("Expected identifier after type in argument list");
       return {};
-    SelectedName = IdentifierStr;
-    getNextToken();
-  } else if (CurTok == tok_identifier) {
-    SelectedName = IdentifierStr;
-    getNextToken();
-
-    if (CurTok == ':') {
-      getNextToken();
-      if (CurTok == tok_int)
-        SelectedType = TypeKind::Int;
-      else if (CurTok == tok_double)
-        SelectedType = TypeKind::Double;
-      getNextToken();
     }
+  } else if (CurTok != tok_identifier) {
+    LogError("Expected argument name or type");
+    return {};
+  }
+
+  SelectedName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok == ':') {
+    getNextToken();
+    SelectedType = ParseType();
   }
 
   return {SelectedName, SelectedType};
 }
 
-// --- Logic for Functions/Prototypes ---
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
   TypeKind RetType = TypeKind::Double;
-  std::string FnName;
-
   if (CurTok == tok_int || CurTok == tok_double) {
     RetType = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
     getNextToken();
   }
 
-  if (CurTok != tok_identifier)
+  if (CurTok != tok_identifier) {
+    LogError("Expected function name in prototype");
     return nullptr;
+  }
 
-  FnName = IdentifierStr;
+  std::string FnName = IdentifierStr;
   getNextToken();
 
-  if (CurTok != '(')
+  if (!Expect('(', "after function name"))
     return nullptr;
-
-  getNextToken();
 
   std::vector<ArgInfo> Args;
   if (CurTok != ')') {
@@ -356,9 +433,8 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
 
       if (CurTok == ')')
         break;
-      if (CurTok != ',')
+      if (!Expect(',', "between arguments"))
         return nullptr;
-      getNextToken();
     }
   }
   getNextToken();
@@ -393,7 +469,6 @@ std::unique_ptr<PrototypeAST> ParseExtern() {
 }
 
 void SetupPrecedence() {
-  // BinopPrecedence[','] = 1;
   BinopPrecedence['='] = 5;
   BinopPrecedence['<'] = 10;
   BinopPrecedence['+'] = 20;
