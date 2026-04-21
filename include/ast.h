@@ -22,8 +22,9 @@ enum class TypeCategory { Int, Double, Struct };
 struct MyType {
   TypeCategory Category;
   std::string Name;
+  int PointerLevel = 0;
 
-  MyType() : Category(TypeCategory::Double), Name("") {}
+  MyType() : Category(TypeCategory::Double), Name(""), PointerLevel(0) {}
 
   MyType(TypeKind TK) {
     if (TK == TypeKind::Int)
@@ -34,6 +35,8 @@ struct MyType {
   }
   MyType(TypeCategory Cat, std::string N = "") : Category(Cat), Name(N) {}
 };
+
+llvm::Type *getLLVMType(MyType T);
 
 struct StructInfo {
   std::string Name;
@@ -56,6 +59,7 @@ class ExprAST {
 public:
   virtual ~ExprAST() = default;
   virtual llvm::Value *codegen() = 0;
+  virtual MyType getType() = 0;
 };
 
 // Expression class for: struct Name { x: double, y: double }
@@ -80,6 +84,7 @@ public:
                       std::string MemberName)
       : StructExpr(std::move(StructExpr)), MemberName(MemberName) {}
   llvm::Value *codegen() override;
+  MyType getType() override;
 };
 
 // Expression class for numeric literals.
@@ -89,6 +94,7 @@ class NumberExprAST : public ExprAST {
 public:
   NumberExprAST(double Val) : Val(Val) {}
   llvm::Value *codegen() override;
+  MyType getType() override { return MyType(TypeCategory::Double); }
 };
 
 // Expression class for global variables.
@@ -101,6 +107,24 @@ public:
   GlobalVarAST(const std::string &Name, MyType Ty, double InitVal)
       : Name(Name), Ty(Ty), InitVal(InitVal) {}
   llvm::Value *codegen() override;
+  MyType getType() override { return Ty; }
+};
+
+// Expression class for unary variables / pointers.
+class UnaryExprAST : public ExprAST {
+  char Opcode;
+  std::unique_ptr<ExprAST> Operand;
+
+public:
+  UnaryExprAST(char Opcode, std::unique_ptr<ExprAST> Operand)
+      : Opcode(Opcode), Operand(std::move(Operand)) {}
+  virtual ~UnaryExprAST() {}
+
+  llvm::Value *codegen() override;
+
+  char getOpcode() const { return Opcode; }
+  ExprAST *getOperand() const { return Operand.get(); }
+  MyType getType() override;
 };
 
 // Expression class for creating variables
@@ -113,6 +137,7 @@ public:
   VarExprAST(std::string Name, MyType Ty, std::unique_ptr<ExprAST> Init)
       : Name(std::move(Name)), Ty(std::move(Ty)), Init(std::move(Init)) {}
   llvm::Value *codegen() override;
+  MyType getType() override { return Ty; }
 };
 
 // Expression class for referencing variables.
@@ -123,6 +148,7 @@ public:
   VariableExprAST(const std::string &Name) : Name(Name) {}
   const std::string &getName() const { return Name; }
   llvm::Value *codegen() override;
+  MyType getType() override;
 };
 
 // Expression class for a binary operator.
@@ -138,6 +164,8 @@ public:
   std::unique_ptr<ExprAST> &getLHS() { return LHS; };
   std::unique_ptr<ExprAST> &getRHS() { return RHS; };
 
+  MyType getType() override;
+
   llvm::Value *codegen() override;
 };
 
@@ -151,6 +179,7 @@ public:
               std::vector<std::unique_ptr<ExprAST>> Args)
       : Callee(Callee), Args(std::move(Args)) {}
   llvm::Value *codegen() override;
+  MyType getType() override;
 };
 
 class PrototypeAST {
@@ -190,6 +219,7 @@ public:
       : Cond(std::move(Cond)), Then(std::move(Then)), Else(std::move(Else)) {}
 
   llvm::Value *codegen() override;
+  MyType getType() override;
 };
 
 class ForExprAST : public ExprAST {
@@ -204,6 +234,7 @@ public:
         Step(std::move(Step)), Body(std::move(Body)) {}
 
   llvm::Value *codegen() override;
+  MyType getType() override { return MyType(TypeCategory::Double); }
 };
 
 class BlockExprAST : public ExprAST {
@@ -214,6 +245,7 @@ public:
       : Expressions(std::move(Expressions)) {}
 
   llvm::Value *codegen() override;
+  MyType getType() override;
 };
 
 #endif // !AST_H

@@ -1,0 +1,20 @@
+extern printd(x)
+
+struct V { x: double }
+
+fun main() {
+    double val = 42;
+    double* ptr = &val;
+    *ptr = 100;
+
+    printd(val);
+
+    V a;
+
+    ptr = &(a.x);
+
+    *ptr = 200;
+
+    printd(val);
+    printd(a.x);
+}

@@ -114,20 +114,23 @@ static int GetTokPrecedence() {
 
 // --- Logic for Primary Expressions ---
 static MyType ParseType() {
+  MyType Ty;
   if (CurTok == tok_int) {
+    Ty = MyType(TypeCategory::Int);
     getNextToken();
-    return {TypeCategory::Int, ""};
-  }
-  if (CurTok == tok_double) {
+  } else if (CurTok == tok_double) {
+    Ty = MyType(TypeCategory::Double);
     getNextToken();
-    return {TypeCategory::Double, ""};
-  }
-  if (CurTok == tok_identifier) {
-    std::string TypeName = IdentifierStr;
+  } else if (CurTok == tok_identifier) {
+    Ty = MyType(TypeCategory::Struct, IdentifierStr);
     getNextToken();
-    return {TypeCategory::Struct, TypeName};
   }
-  return {TypeCategory::Double, ""};
+
+  while (CurTok == '*') {
+    Ty.PointerLevel++;
+    getNextToken();
+  }
+  return Ty;
 }
 
 // "x: double | double x;" flex in structs : )
@@ -135,16 +138,17 @@ static std::pair<std::string, MyType> ParseVariableSignature() {
   std::string Name;
   MyType Ty;
 
-  if (CurTok == tok_int || CurTok == tok_double) {
-    Ty = (CurTok == tok_int) ? MyType(TypeCategory::Int)
-                             : MyType(TypeCategory::Double);
-    getNextToken();
+  if (CurTok == tok_int || CurTok == tok_double ||
+      (CurTok == tok_identifier && StructTypeMap.count(IdentifierStr))) {
+    Ty = ParseType();
+
     if (CurTok != tok_identifier) {
       LogError("Expected identifier after type");
       return {"", Ty};
     }
     Name = IdentifierStr;
     getNextToken();
+
   } else if (CurTok == tok_identifier) {
     Name = IdentifierStr;
     getNextToken();
@@ -495,6 +499,17 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
 }
 
+static std::unique_ptr<ExprAST> ParseUnary() {
+  if (!isascii(CurTok) || CurTok == '(' || CurTok == ',' || CurTok == '{')
+    return ParsePrimary();
+
+  int Opc = CurTok;
+  getNextToken();
+  if (auto Operand = ParseUnary())
+    return std::make_unique<UnaryExprAST>(Opc, std::move(Operand));
+  return nullptr;
+}
+
 // --- Logic for Binary Expressions ---
 
 static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
@@ -507,7 +522,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
     int BinOp = CurTok;
     getNextToken();
 
-    auto RHS = ParsePrimary();
+    auto RHS = ParseUnary();
     if (!RHS)
       return nullptr;
 
@@ -524,7 +539,7 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
 }
 
 std::unique_ptr<ExprAST> ParseExpression() {
-  auto LHS = ParsePrimary();
+  auto LHS = ParseUnary();
   if (!LHS)
     return nullptr;
   return ParseBinOpRHS(0, std::move(LHS));

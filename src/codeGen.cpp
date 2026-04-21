@@ -46,11 +46,105 @@ llvm::Function *getFunction(std::string Name) {
   return nullptr;
 }
 
+MyType VariableExprAST::getType() {
+  if (NamedValues.count(Name))
+    return NamedValues[Name].Type;
+  return MyType(TypeCategory::Double);
+}
+
+MyType UnaryExprAST::getType() {
+  MyType T = Operand->getType();
+  if (Opcode == '*') {
+    if (T.PointerLevel > 0)
+      T.PointerLevel--;
+  } else if (Opcode == '&') {
+    T.PointerLevel++;
+  }
+  return T;
+}
+
+MyType BinaryExprAST::getType() {
+  if (Op == '.') {
+    MyType LHSStore = LHS->getType();
+    if (LHSStore.Category == TypeCategory::Struct) {
+      auto &SInfo = StructDefs[LHSStore.Name];
+      auto *MemberVar = dynamic_cast<VariableExprAST *>(RHS.get());
+      if (MemberVar) {
+        for (auto &m : SInfo.Members) {
+          if (m.first == MemberVar->getName())
+            return m.second;
+        }
+      }
+    }
+  }
+
+  MyType L = LHS->getType();
+  MyType R = RHS->getType();
+  if (L.Category == TypeCategory::Double || R.Category == TypeCategory::Double)
+    return MyType(TypeCategory::Double);
+  return L;
+}
+
+MyType MemberAccessExprAST::getType() {
+  MyType BaseTy = StructExpr->getType();
+  auto &SInfo = StructDefs[BaseTy.Name];
+  for (auto &m : SInfo.Members) {
+    if (m.first == MemberName)
+      return m.second;
+  }
+  return MyType(TypeCategory::Double);
+}
+
+MyType CallExprAST::getType() {
+  auto it = FunctionProtos.find(Callee);
+  if (it != FunctionProtos.end())
+    return it->second->getRetType();
+
+  return MyType(TypeCategory::Double);
+}
+
+MyType IfExprAST::getType() { return Then->getType(); }
+
+MyType BlockExprAST::getType() {
+  if (Expressions.empty())
+    return MyType(TypeCategory::Double);
+  return Expressions.back()->getType();
+}
+
+llvm::Type *getLLVMType(MyType T) {
+  llvm::Type *BaseTy = nullptr;
+  switch (T.Category) {
+  case TypeCategory::Int:
+    BaseTy = llvm::Type::getInt32Ty(*TheContext);
+    break;
+  case TypeCategory::Double:
+    BaseTy = llvm::Type::getDoubleTy(*TheContext);
+    break;
+  case TypeCategory::Struct:
+    BaseTy = StructTypeMap[T.Name];
+    break;
+  }
+
+  if (!BaseTy)
+    return nullptr;
+
+  for (int i = 0; i < T.PointerLevel; ++i) {
+    BaseTy = llvm::PointerType::get(*TheContext, 0);
+  }
+  return BaseTy;
+}
+
 llvm::Value *GetLValueAddress(ExprAST *Expr) {
   if (auto *VE = dynamic_cast<VariableExprAST *>(Expr)) {
     if (NamedValues.count(VE->getName()))
       return NamedValues[VE->getName()].V;
     return TheModule->getNamedGlobal(VE->getName());
+  }
+
+  if (auto *UE = dynamic_cast<UnaryExprAST *>(Expr)) {
+    if (UE->getOpcode() == '*') {
+      return UE->getOperand()->codegen();
+    }
   }
 
   if (auto *BE = dynamic_cast<BinaryExprAST *>(Expr)) {
@@ -59,21 +153,14 @@ llvm::Value *GetLValueAddress(ExprAST *Expr) {
       if (!StructPtr)
         return nullptr;
 
-      if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(StructPtr)) {
-        auto *STy = llvm::cast<llvm::StructType>(Alloca->getAllocatedType());
+      MyType LHSTy = BE->getLHS()->getType();
+      llvm::Type *FullTy = getLLVMType(LHSTy);
 
-        auto *MemberExpr = dynamic_cast<VariableExprAST *>(BE->getRHS().get());
-        if (!MemberExpr)
-          return LogErrorV("RHS of '.' must be a member name");
+      auto *MemberExpr = dynamic_cast<VariableExprAST *>(BE->getRHS().get());
+      unsigned Index =
+          StructDefs[LHSTy.Name].MemberIndex[MemberExpr->getName()];
 
-        std::string MemberName = MemberExpr->getName();
-        unsigned Index =
-            StructDefs[STy->getName().str()].MemberIndex[MemberName];
-
-        return TheBuilder->CreateStructGEP(STy, StructPtr, Index);
-      } else {
-        return LogErrorV("Struct access on non-alloca not supported yet");
-      }
+      return TheBuilder->CreateStructGEP(FullTy, StructPtr, Index);
     }
   }
   return nullptr;
@@ -127,21 +214,6 @@ llvm::Value *VariableExprAST::codegen() {
   return LogErrorV("Unknown variable name");
 }
 
-llvm::Type *getLLVMType(MyType T) {
-  switch (T.Category) {
-  case TypeCategory::Int:
-    return llvm::Type::getInt32Ty(*TheContext);
-  case TypeCategory::Double:
-    return llvm::Type::getDoubleTy(*TheContext);
-  case TypeCategory::Struct:
-    if (StructTypeMap.count(T.Name))
-      return StructTypeMap[T.Name];
-    fprintf(stderr, "Unknown struct type: %s\n", T.Name.c_str());
-    return nullptr;
-  }
-  return nullptr;
-}
-
 llvm::Value *GlobalVarAST::codegen() {
   llvm::Type *Type = getLLVMType(Ty);
 
@@ -186,11 +258,11 @@ llvm::Value *BinaryExprAST::codegen() {
     if (!Val)
       return nullptr;
 
-    llvm::Type *DestTy = nullptr;
-    if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(VariableAddr))
-      DestTy = Alloca->getAllocatedType();
-    else if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(VariableAddr))
-      DestTy = GEP->getResultElementType();
+    MyType TargetMyType = LHS->getType();
+    llvm::Type *DestTy = getLLVMType(TargetMyType);
+
+    if (DestTy)
+      Val = EmitCast(Val, DestTy);
 
     if (DestTy)
       Val = EmitCast(Val, DestTy);
@@ -530,4 +602,24 @@ llvm::Value *MemberAccessExprAST::codegen() {
 
   return TheBuilder->CreateLoad(STy->getElementType(Index), MemberPtr,
                                 MemberName.c_str());
+}
+
+llvm::Value *UnaryExprAST::codegen() {
+  if (Opcode == '&') {
+    auto *Addr = GetLValueAddress(Operand.get());
+    if (!Addr)
+      return LogErrorV("Cannot take address of non-L-value");
+    return Addr;
+  }
+  if (Opcode == '*') {
+    auto *Ptr = Operand->codegen();
+    if (!Ptr || !Ptr->getType()->isPointerTy())
+      return LogErrorV("Cannot dereference non-pointer type");
+
+    MyType TargetTy = getType();
+    llvm::Type *LLVMTargetTy = getLLVMType(TargetTy);
+
+    return TheBuilder->CreateLoad(LLVMTargetTy, Ptr, "deref");
+  }
+  return nullptr;
 }
