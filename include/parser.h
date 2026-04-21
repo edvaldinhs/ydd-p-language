@@ -16,6 +16,7 @@ void SetupPrecedence();
 int PeekToken(size_t n);
 
 std::unique_ptr<ExprAST> ParseExpression();
+std::unique_ptr<StructDefinitionAST> ParseStructDefinition();
 std::unique_ptr<FunctionAST> ParseDefinition();
 std::unique_ptr<PrototypeAST> ParseExtern();
 std::unique_ptr<GlobalVarAST> ParseGlobal();

@@ -23,6 +23,8 @@ enum Token {
 
   tok_int = -11,
   tok_double = -12,
+
+  tok_struct = -13,
 };
 
 extern std::string IdentifierStr;

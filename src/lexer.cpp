@@ -29,6 +29,8 @@ int gettok() {
       return tok_def;
     if (IdentifierStr == "extern")
       return tok_extern;
+    if (IdentifierStr == "struct")
+      return tok_struct;
     if (IdentifierStr == "if")
       return tok_if;
     if (IdentifierStr == "then")
@@ -46,12 +48,20 @@ int gettok() {
     return tok_identifier;
   }
 
+  if (LastChar == '.') {
+    LastChar = getchar();
+    return '.';
+  }
+
   if (isdigit(LastChar) || LastChar == '.') {
     std::string NumStr;
-    bool isFP = false;
+    bool hasDot = false;
     do {
-      if (LastChar == '.')
-        isFP = true;
+      if (LastChar == '.') {
+        if (hasDot)
+          break;
+        hasDot = true;
+      }
       NumStr += LastChar;
       LastChar = getchar();
     } while (isdigit(LastChar) || LastChar == '.');

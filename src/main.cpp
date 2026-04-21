@@ -131,6 +131,12 @@ int main(int argc, char **argv) {
       else
         getNextToken();
       break;
+    case tok_struct:
+      if (auto StructAST = ParseStructDefinition())
+        StructAST->codegen();
+      else
+        getNextToken();
+      break;
     case tok_extern:
       if (auto ProtoAST = ParseExtern())
         ProtoAST->codegen();

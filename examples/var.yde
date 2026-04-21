@@ -1,0 +1,33 @@
+extern printd(x);
+
+int gVarA = 1;
+gVarB:int = 2;
+
+double   gVarC = 3;
+gVarD:   double = 4;
+
+fun globalVar(){
+  printd(gVarA);
+  printd(gVarB);
+  printd(gVarC);
+  printd(gVarD);
+}
+
+fun localVar(){
+  int lVarA = 5;
+  lVarB:int = 6;
+
+  double       lVarA = 5;
+  lVarB:    double = 6;
+
+
+  printd(lVarA);
+  printd(lVarB);
+}
+
+fun main() {
+
+  globalVar();
+  localVar();
+
+}

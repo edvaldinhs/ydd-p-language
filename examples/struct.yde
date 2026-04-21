@@ -1,0 +1,40 @@
+extern printd(x);
+
+struct Pixel {
+  r: int;
+  int g;
+  int b;
+}
+
+struct DPixel {
+  double r,
+  g:double,
+  b:    double,
+}
+
+fun pix(){
+  Pixel pixel;
+  pixel.r = 255;
+  pixel.g = 120;
+  pixel.b = 10;
+
+  printd(pixel.b);
+  printd(pixel.g);
+  printd(pixel.r);
+
+  p:DPixel;
+  p.r = 1;
+  p.g = 2;
+  p.b = 3;
+
+  printd(p.r);
+  printd(p.g);
+  printd(p.b);
+
+  printd(pixel.r + pixel.g + pixel.b);
+  1
+}
+
+fun main(){
+    pix();
+}

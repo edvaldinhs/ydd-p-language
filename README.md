@@ -51,7 +51,7 @@ $ mkdir build
 $ cd build
 $ cmake ..
 $ make
-$ ./yde ../examples/divide.yde
+$ ./yde ../examples/for.yde
 ```
 
 You can create your own .yde files to test it out!

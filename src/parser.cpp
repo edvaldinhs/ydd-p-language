@@ -1,10 +1,13 @@
 #include "../include/parser.h"
 #include <deque>
+#include <llvm/IR/Type.h>
 #include <memory>
 
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
+
+extern std::map<std::string, llvm::StructType *> StructTypeMap;
 
 int CurTok;
 std::map<char, int> BinopPrecedence;
@@ -110,25 +113,114 @@ static int GetTokPrecedence() {
 }
 
 // --- Logic for Primary Expressions ---
-static TypeKind ParseType() {
+static MyType ParseType() {
   if (CurTok == tok_int) {
     getNextToken();
-    return TypeKind::Int;
+    return {TypeCategory::Int, ""};
   }
   if (CurTok == tok_double) {
     getNextToken();
-    return TypeKind::Double;
+    return {TypeCategory::Double, ""};
   }
-  return TypeKind::Double;
+  if (CurTok == tok_identifier) {
+    std::string TypeName = IdentifierStr;
+    getNextToken();
+    return {TypeCategory::Struct, TypeName};
+  }
+  return {TypeCategory::Double, ""};
+}
+
+// "x: double | double x;" flex in structs : )
+static std::pair<std::string, MyType> ParseVariableSignature() {
+  std::string Name;
+  MyType Ty;
+
+  if (CurTok == tok_int || CurTok == tok_double) {
+    Ty = (CurTok == tok_int) ? MyType(TypeCategory::Int)
+                             : MyType(TypeCategory::Double);
+    getNextToken();
+    if (CurTok != tok_identifier) {
+      LogError("Expected identifier after type");
+      return {"", Ty};
+    }
+    Name = IdentifierStr;
+    getNextToken();
+  } else if (CurTok == tok_identifier) {
+    Name = IdentifierStr;
+    getNextToken();
+    if (CurTok != ':') {
+      LogError("Expected ':' after identifier for type declaration");
+      return {"", MyType(TypeCategory::Double)};
+    }
+    getNextToken();
+    Ty = ParseType();
+  } else {
+    LogError("Expected type or identifier");
+    return {"", MyType(TypeCategory::Double)};
+  }
+  return {Name, Ty};
+}
+
+std::unique_ptr<ExprAST> ParseVarExpr() {
+  auto VarInfo = ParseVariableSignature();
+  if (VarInfo.first.empty())
+    return nullptr;
+
+  std::unique_ptr<ExprAST> Init = nullptr;
+  if (CurTok == '=') {
+    getNextToken();
+    Init = ParseExpression();
+  }
+
+  return std::make_unique<VarExprAST>(VarInfo.first, VarInfo.second,
+                                      std::move(Init));
+}
+
+std::unique_ptr<GlobalVarAST> ParseGlobal() {
+  auto VarInfo = ParseVariableSignature();
+  if (VarInfo.first.empty())
+    return nullptr;
+
+  double Val = 0;
+  if (CurTok == '=') {
+    getNextToken();
+    if (CurTok == tok_number) {
+      Val = NumVal;
+      getNextToken();
+    } else {
+      LogError("Global initializer must be a numeric literal");
+    }
+  }
+
+  if (CurTok == ';')
+    getNextToken();
+
+  return std::make_unique<GlobalVarAST>(VarInfo.first, VarInfo.second, Val);
 }
 
 static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
   std::string IdName = IdentifierStr;
+
+  if (StructTypeMap.count(IdName)) {
+    getNextToken();
+    if (CurTok != tok_identifier)
+      return LogError("Expected variable name after struct type");
+    std::string VarName = IdentifierStr;
+    getNextToken();
+
+    return std::make_unique<VarExprAST>(
+        VarName, MyType(TypeCategory::Struct, IdName), nullptr);
+  }
+
+  if (PeekToken(0) == ':') {
+    return ParseVarExpr();
+  }
+
   getNextToken();
 
   if (CurTok == ':') {
     getNextToken();
-    TypeKind Ty = ParseType();
+    MyType Ty = ParseType();
     std::unique_ptr<ExprAST> Init = nullptr;
     if (CurTok == '=') {
       getNextToken();
@@ -164,63 +256,6 @@ static std::unique_ptr<ExprAST> ParseNumberExpr() {
   auto Result = std::make_unique<NumberExprAST>(NumVal);
   getNextToken();
   return Result;
-}
-
-std::unique_ptr<ExprAST> ParseVarExpr() {
-  TypeKind Ty = ParseType();
-  if (CurTok != tok_identifier)
-    return LogError("Expected identifier");
-
-  std::string Name = IdentifierStr;
-  getNextToken();
-
-  std::unique_ptr<ExprAST> Init = nullptr;
-  if (CurTok == '=') {
-    getNextToken();
-    Init = ParseExpression();
-  }
-  return std::make_unique<VarExprAST>(Name, Ty, std::move(Init));
-}
-
-std::unique_ptr<GlobalVarAST> ParseGlobal() {
-  TypeKind Ty;
-  std::string Name;
-
-  if (CurTok == tok_int || CurTok == tok_double) {
-    Ty = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
-    getNextToken();
-    if (CurTok != tok_identifier) {
-      LogError("Expected identifier after type");
-      return nullptr;
-    }
-    Name = IdentifierStr;
-    getNextToken();
-  } else {
-    Name = IdentifierStr;
-    getNextToken();
-    if (CurTok != ':') {
-      LogError("Expected ':' after global identifier");
-      return nullptr;
-    }
-    getNextToken();
-    Ty = ParseType();
-  }
-
-  double Val = 0;
-  if (CurTok == '=') {
-    getNextToken();
-    if (CurTok == tok_number) {
-      Val = NumVal;
-      getNextToken();
-    } else {
-      LogError("Global initializer must be a numeric literal");
-    }
-  }
-
-  if (CurTok == ';')
-    getNextToken();
-
-  return std::make_unique<GlobalVarAST>(Name, Ty, Val);
 }
 
 static std::unique_ptr<ExprAST> ParseParenExpr() {
@@ -318,6 +353,125 @@ static std::unique_ptr<ExprAST> ParseBlockExpr() {
   return std::make_unique<BlockExprAST>(std::move(Exprs));
 }
 
+// --- Logic for Functions/Globals ---
+
+static ArgInfo ParseArgument() {
+  MyType SelectedType = MyType(TypeCategory::Double);
+  std::string SelectedName;
+
+  if (CurTok == tok_int || CurTok == tok_double) {
+    SelectedType = (CurTok == tok_int) ? MyType(TypeCategory::Int)
+                                       : MyType(TypeCategory::Double);
+    getNextToken();
+    if (CurTok != tok_identifier) {
+      LogError("Expected identifier after type in argument list");
+      return {};
+    }
+  } else if (CurTok != tok_identifier) {
+    LogError("Expected argument name or type");
+    return {};
+  }
+
+  SelectedName = IdentifierStr;
+  getNextToken();
+
+  if (CurTok == ':') {
+    getNextToken();
+    SelectedType = ParseType();
+  }
+
+  return {SelectedName, SelectedType};
+}
+
+static std::unique_ptr<PrototypeAST> ParsePrototype() {
+  MyType RetType = MyType(TypeCategory::Double);
+  if (CurTok == tok_int || CurTok == tok_double) {
+    RetType = (CurTok == tok_int) ? MyType(TypeCategory::Int)
+                                  : MyType(TypeCategory::Double);
+    getNextToken();
+  }
+
+  if (CurTok != tok_identifier) {
+    LogError("Expected function name in prototype");
+    return nullptr;
+  }
+
+  std::string FnName = IdentifierStr;
+  getNextToken();
+
+  if (!Expect('(', "after function name"))
+    return nullptr;
+
+  std::vector<ArgInfo> Args;
+  if (CurTok != ')') {
+    while (true) {
+      auto Arg = ParseArgument();
+      if (Arg.Name.empty())
+        return nullptr;
+      Args.push_back(Arg);
+
+      if (CurTok == ')')
+        break;
+      if (!Expect(',', "between arguments"))
+        return nullptr;
+    }
+  }
+  getNextToken();
+
+  return std::make_unique<PrototypeAST>(FnName, std::move(Args), RetType);
+}
+
+std::unique_ptr<FunctionAST> ParseDefinition() {
+  getNextToken();
+  auto Proto = ParsePrototype();
+  if (!Proto)
+    return nullptr;
+
+  if (auto E = ParseExpression())
+    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  return nullptr;
+}
+
+std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
+  if (auto E = ParseExpression()) {
+    std::vector<ArgInfo> EmptyArgs;
+    auto Proto = std::make_unique<PrototypeAST>(
+        "__anon_expr", std::move(EmptyArgs), MyType(TypeCategory::Double));
+    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
+  }
+  return nullptr;
+}
+
+// struct Name { x: double, double x;}
+std::unique_ptr<StructDefinitionAST> ParseStructDefinition() {
+  getNextToken();
+  std::string StructName = IdentifierStr;
+  getNextToken();
+
+  if (!Expect('{', "to start struct body"))
+    return nullptr;
+
+  std::vector<std::pair<std::string, MyType>> Members;
+  while (CurTok != '}' && CurTok != tok_eof) {
+    auto VarInfo = ParseVariableSignature();
+    if (VarInfo.first.empty())
+      return nullptr;
+
+    Members.push_back(VarInfo);
+
+    if (CurTok == ';' || CurTok == ',')
+      getNextToken();
+  }
+
+  getNextToken();
+  return std::make_unique<StructDefinitionAST>(StructName, Members);
+}
+
+std::unique_ptr<PrototypeAST> ParseExtern() {
+  getNextToken();
+  return ParsePrototype();
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   case tok_identifier:
@@ -376,99 +530,8 @@ std::unique_ptr<ExprAST> ParseExpression() {
   return ParseBinOpRHS(0, std::move(LHS));
 }
 
-// --- Logic for Functions/Globals ---
-
-static ArgInfo ParseArgument() {
-  TypeKind SelectedType = TypeKind::Double;
-  std::string SelectedName;
-
-  if (CurTok == tok_int || CurTok == tok_double) {
-    SelectedType = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
-    getNextToken();
-    if (CurTok != tok_identifier) {
-      LogError("Expected identifier after type in argument list");
-      return {};
-    }
-  } else if (CurTok != tok_identifier) {
-    LogError("Expected argument name or type");
-    return {};
-  }
-
-  SelectedName = IdentifierStr;
-  getNextToken();
-
-  if (CurTok == ':') {
-    getNextToken();
-    SelectedType = ParseType();
-  }
-
-  return {SelectedName, SelectedType};
-}
-
-static std::unique_ptr<PrototypeAST> ParsePrototype() {
-  TypeKind RetType = TypeKind::Double;
-  if (CurTok == tok_int || CurTok == tok_double) {
-    RetType = (CurTok == tok_int) ? TypeKind::Int : TypeKind::Double;
-    getNextToken();
-  }
-
-  if (CurTok != tok_identifier) {
-    LogError("Expected function name in prototype");
-    return nullptr;
-  }
-
-  std::string FnName = IdentifierStr;
-  getNextToken();
-
-  if (!Expect('(', "after function name"))
-    return nullptr;
-
-  std::vector<ArgInfo> Args;
-  if (CurTok != ')') {
-    while (true) {
-      auto Arg = ParseArgument();
-      if (Arg.Name.empty())
-        return nullptr;
-      Args.push_back(Arg);
-
-      if (CurTok == ')')
-        break;
-      if (!Expect(',', "between arguments"))
-        return nullptr;
-    }
-  }
-  getNextToken();
-
-  return std::make_unique<PrototypeAST>(FnName, std::move(Args), RetType);
-}
-
-std::unique_ptr<FunctionAST> ParseDefinition() {
-  getNextToken();
-  auto Proto = ParsePrototype();
-  if (!Proto)
-    return nullptr;
-
-  if (auto E = ParseExpression())
-    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
-  return nullptr;
-}
-
-std::unique_ptr<FunctionAST> ParseTopLevelExpr() {
-  if (auto E = ParseExpression()) {
-    std::vector<ArgInfo> EmptyArgs;
-    auto Proto = std::make_unique<PrototypeAST>(
-        "__anon_expr", std::move(EmptyArgs), TypeKind::Double);
-    return std::make_unique<FunctionAST>(std::move(Proto), std::move(E));
-  }
-  return nullptr;
-}
-
-std::unique_ptr<PrototypeAST> ParseExtern() {
-  getNextToken();
-  return ParsePrototype();
-}
-
 void SetupPrecedence() {
+  BinopPrecedence['.'] = 100;
   BinopPrecedence['='] = 5;
   BinopPrecedence['<'] = 10;
   BinopPrecedence['+'] = 20;

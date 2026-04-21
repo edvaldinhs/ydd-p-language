@@ -2,7 +2,6 @@ extern printd(x);
 
 int g = 6;
 
-
 fun sum(x, y, z) {
     x+y+z;
 }

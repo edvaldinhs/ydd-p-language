@@ -17,9 +17,33 @@ struct VarType {
   TypeKind Kind;
 };
 
+enum class TypeCategory { Int, Double, Struct };
+
+struct MyType {
+  TypeCategory Category;
+  std::string Name;
+
+  MyType() : Category(TypeCategory::Double), Name("") {}
+
+  MyType(TypeKind TK) {
+    if (TK == TypeKind::Int)
+      Category = TypeCategory::Int;
+    else
+      Category = TypeCategory::Double;
+    Name = "";
+  }
+  MyType(TypeCategory Cat, std::string N = "") : Category(Cat), Name(N) {}
+};
+
+struct StructInfo {
+  std::string Name;
+  std::vector<std::pair<std::string, MyType>> Members;
+  std::map<std::string, unsigned> MemberIndex;
+};
+
 struct ArgInfo {
   std::string Name;
-  TypeKind Type;
+  MyType Type;
 };
 
 namespace llvm {
@@ -34,6 +58,30 @@ public:
   virtual llvm::Value *codegen() = 0;
 };
 
+// Expression class for: struct Name { x: double, y: double }
+class StructDefinitionAST {
+  std::string Name;
+  std::vector<std::pair<std::string, MyType>> Members;
+
+public:
+  StructDefinitionAST(std::string Name,
+                      std::vector<std::pair<std::string, MyType>> Members)
+      : Name(Name), Members(std::move(Members)) {}
+  llvm::Type *codegen();
+};
+
+// Expression class for member access: p.x
+class MemberAccessExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> StructExpr;
+  std::string MemberName;
+
+public:
+  MemberAccessExprAST(std::unique_ptr<ExprAST> StructExpr,
+                      std::string MemberName)
+      : StructExpr(std::move(StructExpr)), MemberName(MemberName) {}
+  llvm::Value *codegen() override;
+};
+
 // Expression class for numeric literals.
 class NumberExprAST : public ExprAST {
   double Val;
@@ -46,11 +94,11 @@ public:
 // Expression class for global variables.
 class GlobalVarAST : public ExprAST {
   std::string Name;
-  TypeKind Ty;
+  MyType Ty;
   double InitVal;
 
 public:
-  GlobalVarAST(const std::string &Name, TypeKind Ty, double InitVal)
+  GlobalVarAST(const std::string &Name, MyType Ty, double InitVal)
       : Name(Name), Ty(Ty), InitVal(InitVal) {}
   llvm::Value *codegen() override;
 };
@@ -58,11 +106,11 @@ public:
 // Expression class for creating variables
 class VarExprAST : public ExprAST {
   std::string Name;
-  TypeKind Ty;
+  MyType Ty;
   std::unique_ptr<ExprAST> Init;
 
 public:
-  VarExprAST(std::string Name, TypeKind Ty, std::unique_ptr<ExprAST> Init)
+  VarExprAST(std::string Name, MyType Ty, std::unique_ptr<ExprAST> Init)
       : Name(std::move(Name)), Ty(std::move(Ty)), Init(std::move(Init)) {}
   llvm::Value *codegen() override;
 };
@@ -86,6 +134,10 @@ public:
   BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+  char &getOp() { return Op; };
+  std::unique_ptr<ExprAST> &getLHS() { return LHS; };
+  std::unique_ptr<ExprAST> &getRHS() { return RHS; };
+
   llvm::Value *codegen() override;
 };
 
@@ -104,18 +156,18 @@ public:
 class PrototypeAST {
   std::string Name;
   std::vector<ArgInfo> Args;
-  TypeKind RetType;
+  MyType RetType;
 
 public:
   PrototypeAST(const std::string &Name, std::vector<ArgInfo> Args,
-               TypeKind RetType)
+               MyType RetType)
       : Name(Name), Args(std::move(Args)), RetType(RetType) {}
 
   const std::string &getName() const { return Name; }
   llvm::Function *codegen();
 
-  TypeKind getArgType(size_t i) const { return Args[i].Type; }
-  TypeKind getRetType() const { return RetType; }
+  MyType getArgType(size_t i) const { return Args[i].Type; }
+  MyType getRetType() const { return RetType; }
 };
 
 class FunctionAST {
