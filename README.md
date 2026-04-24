@@ -55,7 +55,14 @@ $ git clone https://github.com/edvaldinhs/yde-language
 $ cd yde-language
 ```
 
-Then build the project:
+You can use the setup.sh to build:
+
+```bash
+$ ./setup.sh
+$ ./yde ../examples/for.yde
+```
+
+Or build the project manually:
 
 ```bash
 $ mkdir build
