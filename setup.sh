@@ -2,13 +2,26 @@
 
 set -e
 
+if [ ! -d "build" ]; then
 echo "      --- starting setup ---"
+    mkdir build
+fi
 
-mkdir build
 cd build
-cmake ..
+
+if [ ! -f "Makefile" ]; then
+    cmake ..
+fi
+
+echo "      --- compile ---"
 make
-mv yde ../yde
+
+if [ -f "yde" ]; then
+
+
+    mv yde ../yde
+fi
+
 echo " "
 echo "      --- yde file created ---"
 echo " "
