@@ -1,4 +1,12 @@
 fun main() {
+    int x = -20;
+    print(x);
+    print(" ");
+
+    double k = 4.0;
+    print(k);
+    print(" ");
+
     char* message = "Hello World!";
     print(message);
     0;

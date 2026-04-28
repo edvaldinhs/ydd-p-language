@@ -3,19 +3,19 @@ extern printd(x);
 fun divideiter(x, y, low, high) {
     for i = 0, i < 40, 1 in {
         if (((low + high) * 0.5) * y) < x then {
-            low = (low + high) * 0.5
+            low = (low + high) * 0.5;
         } else {
-            high = (low + high) * 0.5
-        }
+            high = (low + high) * 0.5;
+        };
     };
-    low
+    low;
 }
 
 fun divide(x, y) {
-    divideiter(x, y, 0.0, 1000.0)
+    divideiter(x, y, 0.0, 1000.0);
 }
 
 fun main() {
     printd(divide(10.0, 3.0));
-    printd(divide(2.0, 4.0))
+    printd(divide(2.0, 4.0));
 }

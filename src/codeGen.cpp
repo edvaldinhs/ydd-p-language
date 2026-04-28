@@ -165,6 +165,16 @@ llvm::Value *UnaryExprAST::codegen() {
     return TheBuilder->CreateLoad(getLLVMType(this->getType()), Addr,
                                   "ptr_val");
   }
+  if (Opcode == '-') {
+    llvm::Value *V = Operand->codegen();
+    if (!V)
+      return nullptr;
+
+    if (V->getType()->isDoubleTy())
+      return TheBuilder->CreateFNeg(V, "negtmp");
+
+    return TheBuilder->CreateNeg(V, "negtmp");
+  }
 
   return nullptr;
 }
@@ -316,6 +326,116 @@ llvm::Value *MemberAccessExprAST::getLValue() {
   return TheBuilder->CreateStructGEP(STy, StructPtr, Index);
 }
 
+std::pair<llvm::Value *, llvm::Value *> GenerateItoa(llvm::Value *Val) {
+  llvm::Function *F = TheBuilder->GetInsertBlock()->getParent();
+
+  llvm::Type *Int8Ty = llvm::Type::getInt8Ty(*TheContext);
+  llvm::Type *Int32Ty = llvm::Type::getInt32Ty(*TheContext);
+  llvm::Type *Int64Ty = llvm::Type::getInt64Ty(*TheContext);
+
+  llvm::Value *Buffer = TheBuilder->CreateAlloca(
+      Int8Ty, llvm::ConstantInt::get(Int32Ty, 32), "itoa_buf");
+
+  llvm::Value *EndIdx = llvm::ConstantInt::get(Int32Ty, 31);
+  llvm::Value *NullPtr = TheBuilder->CreateInBoundsGEP(Int8Ty, Buffer, EndIdx);
+  TheBuilder->CreateStore(llvm::ConstantInt::get(Int8Ty, 0), NullPtr);
+
+  llvm::Value *Val64 = TheBuilder->CreateSExt(Val, Int64Ty);
+
+  llvm::Value *Zero64 = llvm::ConstantInt::get(Int64Ty, 0);
+
+  llvm::Value *IsNeg = TheBuilder->CreateICmpSLT(Val64, Zero64, "isneg");
+
+  llvm::Value *NegVal = TheBuilder->CreateSub(Zero64, Val64);
+
+  llvm::Value *AbsVal =
+      TheBuilder->CreateSelect(IsNeg, NegVal, Val64, "absval");
+
+  // --- blocks
+  llvm::BasicBlock *PreheaderBB = TheBuilder->GetInsertBlock();
+  llvm::BasicBlock *LoopBB =
+      llvm::BasicBlock::Create(*TheContext, "itoa.loop", F);
+  llvm::BasicBlock *EndBB =
+      llvm::BasicBlock::Create(*TheContext, "itoa.end", F);
+  llvm::BasicBlock *NegBB =
+      llvm::BasicBlock::Create(*TheContext, "itoa.neg", F);
+  llvm::BasicBlock *ContBB =
+      llvm::BasicBlock::Create(*TheContext, "itoa.cont", F);
+
+  llvm::Value *StartIdx = llvm::ConstantInt::get(Int32Ty, 30);
+
+  TheBuilder->CreateBr(LoopBB);
+
+  // --- LOOP ---
+  TheBuilder->SetInsertPoint(LoopBB);
+
+  llvm::PHINode *CurrVal = TheBuilder->CreatePHI(Int64Ty, 2, "currval");
+  llvm::PHINode *CurrIdx = TheBuilder->CreatePHI(Int32Ty, 2, "curridx");
+
+  CurrVal->addIncoming(AbsVal, PreheaderBB);
+  CurrIdx->addIncoming(StartIdx, PreheaderBB);
+
+  llvm::Value *Digit =
+      TheBuilder->CreateSRem(CurrVal, llvm::ConstantInt::get(Int64Ty, 10));
+
+  llvm::Value *DigitChar =
+      TheBuilder->CreateAdd(TheBuilder->CreateTrunc(Digit, Int8Ty),
+                            llvm::ConstantInt::get(Int8Ty, '0'));
+
+  llvm::Value *Ptr = TheBuilder->CreateInBoundsGEP(Int8Ty, Buffer, CurrIdx);
+  TheBuilder->CreateStore(DigitChar, Ptr);
+
+  llvm::Value *NextVal =
+      TheBuilder->CreateSDiv(CurrVal, llvm::ConstantInt::get(Int64Ty, 10));
+
+  llvm::Value *NextIdx =
+      TheBuilder->CreateSub(CurrIdx, llvm::ConstantInt::get(Int32Ty, 1));
+
+  CurrVal->addIncoming(NextVal, LoopBB);
+  CurrIdx->addIncoming(NextIdx, LoopBB);
+
+  llvm::Value *Cond = TheBuilder->CreateICmpSGT(NextVal, Zero64);
+
+  TheBuilder->CreateCondBr(Cond, LoopBB, EndBB);
+
+  // --- END ---
+  TheBuilder->SetInsertPoint(EndBB);
+
+  llvm::Value *FirstDigitIdx =
+      TheBuilder->CreateAdd(NextIdx, llvm::ConstantInt::get(Int32Ty, 1));
+
+  TheBuilder->CreateCondBr(IsNeg, NegBB, ContBB);
+
+  // --- NEG ---
+  TheBuilder->SetInsertPoint(NegBB);
+
+  llvm::Value *MinusIdx =
+      TheBuilder->CreateSub(FirstDigitIdx, llvm::ConstantInt::get(Int32Ty, 1));
+
+  llvm::Value *MinusPtr =
+      TheBuilder->CreateInBoundsGEP(Int8Ty, Buffer, MinusIdx);
+
+  TheBuilder->CreateStore(llvm::ConstantInt::get(Int8Ty, '-'), MinusPtr);
+
+  TheBuilder->CreateBr(ContBB);
+
+  // --- CONT ---
+  TheBuilder->SetInsertPoint(ContBB);
+
+  llvm::PHINode *FinalIdx = TheBuilder->CreatePHI(Int32Ty, 2, "finalidx");
+
+  FinalIdx->addIncoming(FirstDigitIdx, EndBB);
+  FinalIdx->addIncoming(MinusIdx, NegBB);
+
+  llvm::Value *StrPtr = TheBuilder->CreateInBoundsGEP(Int8Ty, Buffer, FinalIdx);
+
+  llvm::Value *Len32 = TheBuilder->CreateSub(EndIdx, FinalIdx);
+
+  llvm::Value *Len = TheBuilder->CreateZExt(Len32, Int64Ty);
+
+  return {StrPtr, Len};
+}
+
 llvm::Value *MemberAccessExprAST::codegen() {
   llvm::Value *Ptr = this->getLValue();
   if (!Ptr)
@@ -430,6 +550,60 @@ llvm::Value *GeneratePrintSyscall(llvm::Value *StrPtr, llvm::Value *Len) {
   return TheBuilder->CreateCall(FTy, IA, {SyscallNum, FileDesc, StrPtr, Len});
 }
 
+void GeneratePrintChar(char C) {
+  llvm::Type *Int8Ty = llvm::Type::getInt8Ty(*TheContext);
+  llvm::Type *Int64Ty = llvm::Type::getInt64Ty(*TheContext);
+
+  llvm::Value *Ptr = TheBuilder->CreateAlloca(Int8Ty, nullptr, "char_tmp");
+  TheBuilder->CreateStore(llvm::ConstantInt::get(Int8Ty, C), Ptr);
+
+  GeneratePrintSyscall(Ptr, llvm::ConstantInt::get(Int64Ty, 1));
+}
+
+void GeneratePrintDouble(llvm::Value *Val) {
+  llvm::Type *DoubleTy = llvm::Type::getDoubleTy(*TheContext);
+  llvm::Type *Int64Ty = llvm::Type::getInt64Ty(*TheContext);
+  llvm::Function *TheFunction = TheBuilder->GetInsertBlock()->getParent();
+
+  llvm::Value *ZeroD = llvm::ConstantFP::get(DoubleTy, 0.0);
+  llvm::Value *IsNeg = TheBuilder->CreateFCmpOLT(Val, ZeroD, "isneg");
+
+  llvm::BasicBlock *EntryBB = TheBuilder->GetInsertBlock();
+  llvm::BasicBlock *PrintMinusBB =
+      llvm::BasicBlock::Create(*TheContext, "print_minus", TheFunction);
+  llvm::BasicBlock *ContBB =
+      llvm::BasicBlock::Create(*TheContext, "ftoa_cont", TheFunction);
+
+  TheBuilder->CreateCondBr(IsNeg, PrintMinusBB, ContBB);
+
+  TheBuilder->SetInsertPoint(PrintMinusBB);
+  GeneratePrintChar('-');
+  llvm::Value *NegVal = TheBuilder->CreateFNeg(Val, "neg_val");
+  TheBuilder->CreateBr(ContBB);
+
+  TheBuilder->SetInsertPoint(ContBB);
+  llvm::PHINode *AbsVal = TheBuilder->CreatePHI(DoubleTy, 2, "abs_val");
+  AbsVal->addIncoming(NegVal, PrintMinusBB);
+  AbsVal->addIncoming(Val, EntryBB);
+
+  llvm::Value *IntPart = TheBuilder->CreateFPToSI(AbsVal, Int64Ty, "intpart");
+  auto [IntStr, IntLen] = GenerateItoa(IntPart);
+  GeneratePrintSyscall(IntStr, IntLen);
+
+  GeneratePrintChar('.');
+
+  llvm::Value *IntPartAsDouble = TheBuilder->CreateSIToFP(IntPart, DoubleTy);
+  llvm::Value *Fract = TheBuilder->CreateFSub(AbsVal, IntPartAsDouble, "fract");
+  llvm::Value *Scaled =
+      TheBuilder->CreateFMul(Fract, llvm::ConstantFP::get(DoubleTy, 1000000.0));
+
+  llvm::Value *FractPart =
+      TheBuilder->CreateFPToSI(Scaled, Int64Ty, "fractpart");
+
+  auto [FractStr, FractLen] = GenerateItoa(FractPart);
+  GeneratePrintSyscall(FractStr, FractLen);
+}
+
 MyType CallExprAST::getType() {
   if (Callee == "print") {
     return MyType(TypeCategory::Int);
@@ -444,18 +618,40 @@ MyType CallExprAST::getType() {
 
 llvm::Value *CallExprAST::codegen() {
   if (Callee == "print") {
-    if (Args.empty())
-      return LogErrorV("print expects 1 argument");
-    llvm::Value *StrPtr = Args[0]->codegen();
-    if (!StrPtr)
-      return nullptr;
-    llvm::Value *Len = GenerateStrLen(StrPtr);
-    return GeneratePrintSyscall(StrPtr, Len);
+    llvm::Value *LastSyscallResult = nullptr;
+
+    for (unsigned i = 0, e = Args.size(); i != e; ++i) {
+      llvm::Value *ArgV = Args[i]->codegen();
+      if (!ArgV)
+        return nullptr;
+
+      llvm::Type *Ty = ArgV->getType();
+
+      if (Ty->isIntegerTy()) {
+        auto [StrPtr, Len] = GenerateItoa(ArgV);
+        LastSyscallResult = GeneratePrintSyscall(StrPtr, Len);
+
+      } else if (Ty->isPointerTy()) {
+        llvm::Value *Len = GenerateStrLen(ArgV);
+        LastSyscallResult = GeneratePrintSyscall(ArgV, Len);
+
+      } else if (Ty->isDoubleTy()) {
+        GeneratePrintDouble(ArgV);
+        LastSyscallResult =
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
+      }
+    }
+    return LastSyscallResult
+               ? LastSyscallResult
+               : llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
   }
 
   llvm::Function *CalleeF = getFunction(Callee);
   if (!CalleeF)
     return LogErrorV("Unknown function referenced");
+
+  if (CalleeF->arg_size() != Args.size())
+    return LogErrorV("Incorrect # arguments passed");
 
   std::vector<llvm::Value *> ArgsV;
   for (unsigned i = 0, e = Args.size(); i != e; ++i) {
@@ -552,7 +748,7 @@ llvm::Value *ForExprAST::codegen() {
     OldVal = NamedValues[VarName];
     hadOldValue = true;
   }
-  NamedValues[VarName] = {Alloca, MyType(TypeCategory::Double)};
+  NamedValues[VarName] = {Alloca, Start->getType()};
 
   if (!Body->codegen())
     return nullptr;
