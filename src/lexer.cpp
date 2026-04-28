@@ -45,6 +45,8 @@ int gettok() {
       return tok_int;
     if (IdentifierStr == "double")
       return tok_double;
+    if (IdentifierStr == "char")
+      return tok_char;
     return tok_identifier;
   }
 
@@ -68,6 +70,17 @@ int gettok() {
 
     NumVal = strtod(NumStr.c_str(), nullptr);
     return tok_number;
+  }
+
+  if (LastChar == '"') {
+    IdentifierStr = "";
+    LastChar = getchar();
+    while (LastChar != '"' && LastChar != EOF) {
+      IdentifierStr += LastChar;
+      LastChar = getchar();
+    }
+    LastChar = getchar();
+    return tok_string;
   }
 
   if (LastChar == '#') {

@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
   auto MainSymbol = TheJIT->lookup("main");
   if (MainSymbol) {
     auto (*FP)() = MainSymbol->toPtr<double (*)()>();
-    fprintf(stderr, "Main returned: %f\n", FP());
+    FP();
   }
 
   return 0;

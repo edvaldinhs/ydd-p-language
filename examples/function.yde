@@ -2,15 +2,15 @@ extern printd(x);
 
 fun returnOne() 1
 fun int Two() 2
-fun Three() {(3)}
-fun Four() {4;};
+fun Three() (3)
+fun Four() {4;}
 
 fun fib(int x)
   if x < 3 then 1
-  else fib(x-1) + fib(x-2);
+  else fib(x-1) + fib(x-2)
 
 fun param(a, double b, int c){
-    (a + b + c)
+    (a + b + c);
   }
 
 fun main(){

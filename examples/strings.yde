@@ -1,0 +1,5 @@
+fun main() {
+    char* message = "Hello World!";
+    print(message);
+    0;
+}
