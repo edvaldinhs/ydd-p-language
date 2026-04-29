@@ -17,7 +17,7 @@ struct VarType {
   TypeKind Kind;
 };
 
-enum class TypeCategory { Int, Double, Struct };
+enum class TypeCategory { Int, Double, Struct, Char };
 
 struct MyType {
   TypeCategory Category;
@@ -60,6 +60,8 @@ public:
   virtual ~ExprAST() = default;
   virtual llvm::Value *codegen() = 0;
   virtual MyType getType() = 0;
+
+  virtual llvm::Value *getLValue() { return nullptr; }
 };
 
 // Expression class for: struct Name { x: double, y: double }
@@ -85,6 +87,7 @@ public:
       : StructExpr(std::move(StructExpr)), MemberName(MemberName) {}
   llvm::Value *codegen() override;
   MyType getType() override;
+  llvm::Value *getLValue() override;
 };
 
 // Expression class for numeric literals.
@@ -125,6 +128,7 @@ public:
   char getOpcode() const { return Opcode; }
   ExprAST *getOperand() const { return Operand.get(); }
   MyType getType() override;
+  llvm::Value *getLValue() override;
 };
 
 // Expression class for creating variables
@@ -149,6 +153,22 @@ public:
   const std::string &getName() const { return Name; }
   llvm::Value *codegen() override;
   MyType getType() override;
+  llvm::Value *getLValue() override;
+};
+
+// Expression class for strings : ).
+class StringExprAST : public ExprAST {
+  std::string Val;
+
+public:
+  StringExprAST(const std::string &Val) : Val(Val) {}
+  llvm::Value *codegen() override;
+  size_t getLength() const { return Val.length(); }
+  MyType getType() override {
+    MyType T(TypeCategory::Int);
+    T.PointerLevel = 1;
+    return T;
+  }
 };
 
 // Expression class for a binary operator.
@@ -167,6 +187,8 @@ public:
   MyType getType() override;
 
   llvm::Value *codegen() override;
+
+  llvm::Value *getLValue() override;
 };
 
 // Expression class for function calls.

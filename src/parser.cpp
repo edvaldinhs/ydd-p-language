@@ -20,7 +20,7 @@ extern int CurCol;
 std::deque<int> TokenBuffer;
 std::deque<std::string> IdBuffer;
 
-int AdvanceToken() {
+int getNextToken() {
   if (TokenBuffer.empty()) {
     CurTok = gettok();
   } else {
@@ -31,8 +31,6 @@ int AdvanceToken() {
   }
   return CurTok;
 }
-
-int getNextToken() { return AdvanceToken(); }
 
 int PeekToken(size_t n = 0) {
   while (TokenBuffer.size() <= n) {
@@ -104,6 +102,8 @@ bool Expect(int ExpectedTok, const std::string &Context) {
 }
 
 static int GetTokPrecedence() {
+  //  if (CurTok == '*')
+  //    return -1;
   if (!isascii(CurTok))
     return -1;
   int TokPrec = BinopPrecedence[CurTok];
@@ -115,7 +115,10 @@ static int GetTokPrecedence() {
 // --- Logic for Primary Expressions ---
 static MyType ParseType() {
   MyType Ty;
-  if (CurTok == tok_int) {
+  if (CurTok == tok_char) {
+    Ty = MyType(TypeCategory::Char);
+    getNextToken();
+  } else if (CurTok == tok_int) {
     Ty = MyType(TypeCategory::Int);
     getNextToken();
   } else if (CurTok == tok_double) {
@@ -133,12 +136,11 @@ static MyType ParseType() {
   return Ty;
 }
 
-// "x: double | double x;" flex in structs : )
 static std::pair<std::string, MyType> ParseVariableSignature() {
   std::string Name;
   MyType Ty;
 
-  if (CurTok == tok_int || CurTok == tok_double ||
+  if (CurTok == tok_int || CurTok == tok_double || CurTok == tok_char ||
       (CurTok == tok_identifier && StructTypeMap.count(IdentifierStr))) {
     Ty = ParseType();
 
@@ -162,6 +164,7 @@ static std::pair<std::string, MyType> ParseVariableSignature() {
     LogError("Expected type or identifier");
     return {"", MyType(TypeCategory::Double)};
   }
+
   return {Name, Ty};
 }
 
@@ -174,6 +177,8 @@ std::unique_ptr<ExprAST> ParseVarExpr() {
   if (CurTok == '=') {
     getNextToken();
     Init = ParseExpression();
+    if (!Init)
+      return nullptr;
   }
 
   return std::make_unique<VarExprAST>(VarInfo.first, VarInfo.second,
@@ -341,50 +346,36 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
 static std::unique_ptr<ExprAST> ParseBlockExpr() {
   getNextToken();
   std::vector<std::unique_ptr<ExprAST>> Exprs;
-
   while (CurTok != '}' && CurTok != tok_eof) {
-    auto E = ParseExpression();
-    if (!E)
+    if (auto E = ParseExpression()) {
+      Exprs.push_back(std::move(E));
+      if (!Expect(';', "after expression"))
+        return nullptr;
+    } else
       return nullptr;
-    Exprs.push_back(std::move(E));
-
-    if (CurTok == ';')
-      getNextToken();
   }
-
-  if (!Expect('}', "at end of block"))
-    return nullptr;
-  return std::make_unique<BlockExprAST>(std::move(Exprs));
+  return (Expect('}', "at end of block")
+              ? std::make_unique<BlockExprAST>(std::move(Exprs))
+              : nullptr);
 }
 
 // --- Logic for Functions/Globals ---
 
 static ArgInfo ParseArgument() {
-  MyType SelectedType = MyType(TypeCategory::Double);
-  std::string SelectedName;
-
+  MyType Ty = MyType(TypeCategory::Double);
   if (CurTok == tok_int || CurTok == tok_double) {
-    SelectedType = (CurTok == tok_int) ? MyType(TypeCategory::Int)
-                                       : MyType(TypeCategory::Double);
+    Ty = (CurTok == tok_int) ? TypeCategory::Int : TypeCategory::Double;
     getNextToken();
-    if (CurTok != tok_identifier) {
-      LogError("Expected identifier after type in argument list");
-      return {};
-    }
-  } else if (CurTok != tok_identifier) {
-    LogError("Expected argument name or type");
-    return {};
   }
-
-  SelectedName = IdentifierStr;
+  if (CurTok != tok_identifier)
+    return (LogError("Expected argument name"), ArgInfo{});
+  std::string Name = IdentifierStr;
   getNextToken();
-
   if (CurTok == ':') {
     getNextToken();
-    SelectedType = ParseType();
+    Ty = ParseType();
   }
-
-  return {SelectedName, SelectedType};
+  return {Name, Ty};
 }
 
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
@@ -476,37 +467,53 @@ std::unique_ptr<PrototypeAST> ParseExtern() {
   return ParsePrototype();
 }
 
+static std::unique_ptr<ExprAST> ParseStringExpr() {
+  auto Result = std::make_unique<StringExprAST>(IdentifierStr);
+  getNextToken();
+  return Result;
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() {
   switch (CurTok) {
   case tok_identifier:
     return ParseIdentifierExpr();
-  case tok_number:
-    return ParseNumberExpr();
+  case tok_number: {
+    auto Res = std::make_unique<NumberExprAST>(NumVal);
+    return (getNextToken(), std::move(Res));
+  }
   case tok_if:
     return ParseIfExpr();
   case tok_for:
     return ParseForExpr();
+  case tok_char:
   case tok_int:
   case tok_double:
     return ParseVarExpr();
+  case tok_string: {
+    auto Res = std::make_unique<StringExprAST>(IdentifierStr);
+    return (getNextToken(), std::move(Res));
+  }
   case '{':
     return ParseBlockExpr();
   case '(':
     return ParseParenExpr();
   default:
     return LogError("Unknown token '" + getTokenName(CurTok) +
-                    "' when expecting an expression");
+                    "' in expression");
   }
 }
 
-static std::unique_ptr<ExprAST> ParseUnary() {
-  if (!isascii(CurTok) || CurTok == '(' || CurTok == ',' || CurTok == '{')
+std::unique_ptr<ExprAST> ParseUnary() {
+  if (CurTok != '*' && CurTok != '&' && CurTok != '-') {
     return ParsePrimary();
+  }
 
   int Opc = CurTok;
   getNextToken();
+
   if (auto Operand = ParseUnary())
     return std::make_unique<UnaryExprAST>(Opc, std::move(Operand));
+
   return nullptr;
 }
 
@@ -516,6 +523,8 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                                               std::unique_ptr<ExprAST> LHS) {
   while (true) {
     int TokPrec = GetTokPrecedence();
+    if (!LHS)
+      return nullptr;
     if (TokPrec < ExprPrec)
       return LHS;
 
@@ -546,6 +555,7 @@ std::unique_ptr<ExprAST> ParseExpression() {
 }
 
 void SetupPrecedence() {
+  BinopPrecedence[';'] = -1;
   BinopPrecedence['.'] = 100;
   BinopPrecedence['='] = 5;
   BinopPrecedence['<'] = 10;

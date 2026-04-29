@@ -32,7 +32,7 @@ fun pix(){
   printd(p.b);
 
   printd(pixel.r + pixel.g + pixel.b);
-  1
+  1;
 }
 
 fun main(){
