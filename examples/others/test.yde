@@ -1,5 +1,3 @@
-extern printd(x);
-
 int g = 6;
 
 fun sum(x, y, z) {
@@ -7,9 +5,9 @@ fun sum(x, y, z) {
 }
 
 fun main() {
-int x = 4;
-y:int = 2;
-int k = sum(x, y, g);
-    printd(k);
+  int x = 4;
+  y:int = 2;
+  int k = sum(x, y, g);
+  print(k);
 }
 

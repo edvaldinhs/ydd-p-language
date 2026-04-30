@@ -1,20 +1,33 @@
-extern printd(x)
+# This file show how we can create
+# and use pointers in yde language...
 
 struct V { x: double }
 
 fun main() {
+    # declaring val as 42
     double val = 42;
+    print("Initial val: ");
+    print(val + "\n\n");
+
+    # declaring a pointer to val
     double* ptr = &val;
+    # changing val value by the poitner
     *ptr = 100;
 
-    printd(val);
+    print("val after: ");
+    print(val + "\n\n");
 
+    # struct V
     V a;
 
+    #changing ptr adress
     ptr = &(a.x);
 
+    # ptr now changes a.x instead of val
     *ptr = 200;
 
-    printd(val);
-    printd(a.x);
+    print("val: ");
+    print(val + "\n");
+    print("a.x: ");
+    print(a.x + "\n");
 }

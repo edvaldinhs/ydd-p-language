@@ -1,12 +1,27 @@
-extern printd(x);
+# Here's how for loops work in yde
 
 fun multiply(x, y) {
-  for i = 1, i < y, 1 in {
-    x = x + x;
-  };
-  x;
+  int result = x;
+
+  # for loop
+  for 
+  # starting by one
+  i = 1, 
+  # while i < y
+  i < y, 
+  # add 1 in
+  1 in 
+  # what the function does
+  { result = result + x; };
+
+  # That is:
+  # for i = 1, i < y, 1 in { 
+  #   x = x + x;
+  # };
+
+  result;
 }
 
 fun main() {
-  printd(multiply(10, 4));
+  print("4 * 10 = " + multiply(4, 10));
 }

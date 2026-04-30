@@ -27,13 +27,15 @@ std::map<std::string, llvm::StructType *> StructTypeMap;
 extern int CurLine;
 extern int CurCol;
 
-llvm::Value *LogErrorV(const char *Str) {
-  fprintf(stderr, "Error [Line %d, Col %d]: %s\n", CurLine, CurCol, Str);
+llvm::Value *LogErrorV(const std::string &Str) {
+  fprintf(stderr, "Error [Line %d, Col %d]: %s\n", CurLine, CurCol,
+          Str.c_str());
   return nullptr;
 }
 
-llvm::Function *LogErrorF(const char *Str) {
-  fprintf(stderr, "Error [Line %d, Col %d]: %s\n", CurLine, CurCol, Str);
+llvm::Function *LogErrorF(const std::string &Str) {
+  fprintf(stderr, "Error [Line %d, Col %d]: %s\n", CurLine, CurCol,
+          Str.c_str());
   return nullptr;
 }
 
@@ -593,6 +595,13 @@ llvm::Value *BinaryExprAST::codegen() {
 
       return GenerateStrCat(LFinal, RFinal);
     }
+  }
+
+  if (L->getType()->isPointerTy() || R->getType()->isPointerTy()) {
+    std::string ErrMsg = "Type Error: Cannot apply operator '";
+    ErrMsg += Op;
+    ErrMsg += "' to a string.";
+    return LogErrorV(ErrMsg.c_str());
   }
 
   llvm::Type *CommonTy = L->getType();

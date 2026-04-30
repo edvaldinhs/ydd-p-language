@@ -1,20 +1,44 @@
-extern printd(x);
+# You can create a function like this
+# fun name(param a, param b) return;
 
+# the ';' is optional in this case
 fun returnOne() 1
+
+# You can even declare its variable
+# The default is double in this version...
 fun int Two() 2
+
+# It accepts the () context
 fun Three() (3)
+
+# If we use brackets the ';' is now
+# mandatory inside the context of {}
 fun Four() {4;}
 
-fun fib(int x)
-  if x < 3 then 1
-  else fib(x-1) + fib(x-2)
-
+# the params can be declared like this
 fun param(a, double b, int c){
     (a + b + c);
   }
 
+# Funny recursive fibonnaci value finder
+fun fib(int x)
+  if x < 3 then 1
+
+  # This is how we call the functions
+  # name(param a, param b)
+  else fib(x-1) + fib(x-2)
+
 fun main(){
-  printd(Two());
-  printd(fib(10));
-  printd(param(1, Two(), Three()));
+  # We now have default print function yay!!
+  print("returnOne(): ");
+  print(returnOne() + "\n");
+
+  print("Two(): ");
+  print(Two() + "\n");
+
+  print("fib(5): ");
+  print(fib(5) + "\n\n");
+
+  print("param(1, Two(), Three()):\n");
+  print(param(1, Two(), Three()) + "\n");
 }

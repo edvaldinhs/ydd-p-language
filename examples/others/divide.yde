@@ -1,4 +1,4 @@
-extern printd(x);
+# fun divide function
 
 fun divideiter(x, y, low, high) {
     for i = 0, i < 40, 1 in {
@@ -16,6 +16,6 @@ fun divide(x, y) {
 }
 
 fun main() {
-    printd(divide(10.0, 3.0));
-    printd(divide(2.0, 4.0));
+    print(divide(10.0, 3.0) + "\n");
+    print(divide(2.0, 4.0) + "\n");
 }

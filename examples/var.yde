@@ -1,33 +1,44 @@
-extern printd(x);
+# This is how we use variables
+# in yde
 
+# We can use c/c++ like syntax
 int gVarA = 1;
+# Or for funny dudes, use pascal like syntax
 gVarB:int = 2;
 
+# Don't worry about the spacing
 double   gVarC = 3;
 gVarD:   double = 4;
 
 fun globalVar(){
-  printd(gVarA);
-  printd(gVarB);
-  printd(gVarC);
-  printd(gVarD);
+  # The variables til now were globals
+  # in the code context...
+
+  print("Global Vars: ");
+  print(gVarA + "\n");
+  print(gVarB + "\n");
+  print(gVarC + "\n");
+  print(gVarD + "\n\n");
 }
 
 fun localVar(){
+  # We can declare local variables
+  # the same way global ones.
   int lVarA = 5;
   lVarB:int = 6;
 
+  # Very same way...
   double       lVarA = 5;
   lVarB:    double = 6;
 
-
-  printd(lVarA);
-  printd(lVarB);
+  print("Local Vars: ");
+  print(lVarA + "\n");
+  print(lVarB + "\n");
 }
 
 fun main() {
 
   globalVar();
   localVar();
-
+  0;
 }

@@ -1,37 +1,50 @@
-extern printd(x);
-
+# We can declare structs like c++
+#
 struct Pixel {
+  # The same structure of the local and
+  # global variables work here!
   r: int;
   int g;
   int b;
 }
 
+# The same with double
 struct DPixel {
+  # You can use ';' or ','
   double r,
   g:double,
   b:    double,
 }
 
 fun pix(){
+  # Create an "object"
   Pixel pixel;
+  # Insert values
   pixel.r = 255;
   pixel.g = 120;
   pixel.b = 10;
 
-  printd(pixel.b);
-  printd(pixel.g);
-  printd(pixel.r);
+  # Acess the values
+  print("pixel.b, g, r:\n");
+  print(pixel.b + " ");
+  print(pixel.g + " ");
+  print(pixel.r + " \n\n");
 
+  # Same with Double
+  # But with different syntax :w
   p:DPixel;
   p.r = 1;
   p.g = 2;
   p.b = 3;
 
-  printd(p.r);
-  printd(p.g);
-  printd(p.b);
+  print("p.r, g, b:\n");
+  print(p.r + " ");
+  print(p.g + " ");
+  print(p.b + "\n\n");
 
-  printd(pixel.r + pixel.g + pixel.b);
+  print("sum of pixel.r, g, b:\n");
+  print(pixel.r + pixel.g + pixel.b + "\n");
+
   1;
 }
 
