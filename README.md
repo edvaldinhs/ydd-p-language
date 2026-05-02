@@ -78,7 +78,7 @@ You can create your own .yde files to test it out!
 
 ## 💻&nbsp; Project
 
-Building a programming language from scratch to master the inner workings of compilers. This project covers the entire pipeline: designing a custom syntax, building a robust parser, and leveraging LLVM for high-performance execution.
+Building a programming language from scratch to master the inner workings of compilers. This project covers the entire pipeline: building a robust parser, and leveraging LLVM for high-performance execution.
 
 <br>
 
