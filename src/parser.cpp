@@ -3,6 +3,16 @@
 #include <llvm/IR/Type.h>
 #include <memory>
 
+#include <iostream>
+
+// #define ENABLE_DEBUG
+
+#ifdef ENABLE_DEBUG
+#define DEBUG_MSG(msg) std::cerr << "[PARSER] " << msg << std::endl
+#else
+#define DEBUG_MSG(msg)
+#endif
+
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
@@ -304,6 +314,15 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
 static std::unique_ptr<ExprAST> ParseForExpr() {
   getNextToken();
 
+  MyType IteratorType(TypeCategory::Double);
+  if (CurTok == tok_double) {
+    IteratorType = MyType(TypeCategory::Double);
+    getNextToken();
+  } else if (CurTok == tok_int) {
+    IteratorType = MyType(TypeCategory::Int);
+    getNextToken();
+  }
+
   if (CurTok != tok_identifier)
     return LogError("Expected identifier after 'for'");
 
@@ -317,7 +336,8 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
   if (!Start)
     return nullptr;
 
-  if (!Expect(',', "after for-loop start value"))
+  if (!Expect(',', "after for-loop start value") &&
+      !Expect(';', "after for-loop start value"))
     return nullptr;
 
   auto End = ParseExpression();
@@ -325,7 +345,7 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
     return nullptr;
 
   std::unique_ptr<ExprAST> Step;
-  if (CurTok == ',') {
+  if (CurTok == ',' || CurTok == ';') {
     getNextToken();
     Step = ParseExpression();
     if (!Step)
@@ -339,8 +359,9 @@ static std::unique_ptr<ExprAST> ParseForExpr() {
   if (!Body)
     return nullptr;
 
-  return std::make_unique<ForExprAST>(IdName, std::move(Start), std::move(End),
-                                      std::move(Step), std::move(Body));
+  return std::make_unique<ForExprAST>(IdName, IteratorType, std::move(Start),
+                                      std::move(End), std::move(Step),
+                                      std::move(Body));
 }
 
 static std::unique_ptr<ExprAST> ParseBlockExpr() {
@@ -417,6 +438,7 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
 }
 
 std::unique_ptr<FunctionAST> ParseDefinition() {
+  DEBUG_MSG("Parsing Function Definition...");
   getNextToken();
   auto Proto = ParsePrototype();
   if (!Proto)
@@ -474,10 +496,13 @@ static std::unique_ptr<ExprAST> ParseStringExpr() {
 }
 
 static std::unique_ptr<ExprAST> ParsePrimary() {
+  DEBUG_MSG("Parsing Primary Expression");
   switch (CurTok) {
   case tok_identifier:
+    DEBUG_MSG("Detected Identifier: " << IdentifierStr);
     return ParseIdentifierExpr();
   case tok_number: {
+    DEBUG_MSG("Detected Number: " << NumVal);
     auto Res = std::make_unique<NumberExprAST>(NumVal);
     return (getNextToken(), std::move(Res));
   }
@@ -488,14 +513,17 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   case tok_char:
   case tok_int:
   case tok_double:
+    DEBUG_MSG("Parsing Var Expression: " << NumVal);
     return ParseVarExpr();
   case tok_string: {
     auto Res = std::make_unique<StringExprAST>(IdentifierStr);
     return (getNextToken(), std::move(Res));
   }
   case '{':
+    DEBUG_MSG("Entering { Expression");
     return ParseBlockExpr();
   case '(':
+    DEBUG_MSG("Entering Parenthesized Expression");
     return ParseParenExpr();
   default:
     return LogError("Unknown token '" + getTokenName(CurTok) +
@@ -523,12 +551,17 @@ static std::unique_ptr<ExprAST> ParseBinOpRHS(int ExprPrec,
                                               std::unique_ptr<ExprAST> LHS) {
   while (true) {
     int TokPrec = GetTokPrecedence();
+    DEBUG_MSG("Checking Op Precedence: current=" << TokPrec
+                                                 << " vs min=" << ExprPrec);
     if (!LHS)
       return nullptr;
-    if (TokPrec < ExprPrec)
+    if (TokPrec < ExprPrec) {
+      DEBUG_MSG("Precedence too low, returning LHS");
       return LHS;
+    }
 
     int BinOp = CurTok;
+    DEBUG_MSG("Parsing Binary Operator: " << (char)BinOp);
     getNextToken();
 
     auto RHS = ParseUnary();

@@ -1,6 +1,7 @@
 #include "../include/ast.h"
 #include "../include/lexer.h"
 #include "../include/parser.h"
+#include "../include/sema.h"
 
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/FileSystem.h"
@@ -120,48 +121,71 @@ int main(int argc, char **argv) {
 
   getNextToken();
 
+  SemanticAnalyzer Sema;
+
   while (CurTok != tok_eof) {
     switch (CurTok) {
     case ';':
       getNextToken();
       break;
     case tok_def:
-      if (auto FnAST = ParseDefinition())
+      if (auto FnAST = ParseDefinition()) {
+        Sema.AnalyzeFunction(FnAST.get());
         FnAST->codegen();
-      else
+      } else {
         getNextToken();
+      }
       break;
     case tok_struct:
-      if (auto StructAST = ParseStructDefinition())
+      if (auto StructAST = ParseStructDefinition()) {
+        Sema.RegisterStruct(StructAST.get());
         StructAST->codegen();
-      else
+      } else {
         getNextToken();
+      }
       break;
     case tok_extern:
-      if (auto ProtoAST = ParseExtern())
+      if (auto ProtoAST = ParseExtern()) {
+        Sema.DeclareFunction(ProtoAST->getName(), ProtoAST->getRetType());
         ProtoAST->codegen();
-      else
+      } else {
         getNextToken();
+      }
       break;
     case tok_int:
     case tok_double:
-      if (auto GlobalAST = ParseGlobal())
+      if (auto GlobalAST = ParseGlobal()) {
+        Sema.DeclareVariable(GlobalAST->getName(), GlobalAST->getType());
+        Sema.Analyze(GlobalAST.get());
         GlobalAST->codegen();
+      }
       break;
     case tok_identifier:
       if (PeekToken(0) == ':') {
-        if (auto GlobalAST = ParseGlobal())
+        if (auto GlobalAST = ParseGlobal()) {
+          Sema.DeclareVariable(GlobalAST->getName(), GlobalAST->getType());
+          Sema.Analyze(GlobalAST.get());
+
           GlobalAST->codegen();
+        }
       } else {
-        if (auto FnAST = ParseTopLevelExpr())
+        if (auto FnAST = ParseTopLevelExpr()) {
+          Sema.AnalyzeFunction(FnAST.get());
           FnAST->codegen();
+        }
       }
       break;
     default:
-      if (auto FnAST = ParseTopLevelExpr())
+      if (auto FnAST = ParseTopLevelExpr()) {
+        Sema.AnalyzeFunction(FnAST.get());
         FnAST->codegen();
-      else
+
+        if (auto *FnIR = FnAST->codegen()) {
+          FnIR->viewCFG();
+        }
+      } else {
         getNextToken();
+      }
       break;
     }
   }

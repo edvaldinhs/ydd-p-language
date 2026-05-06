@@ -14,6 +14,7 @@ add_executable(yde
   src/parser.cpp
   src/lexer.cpp
   src/codeGen.cpp
+  src/sema.cpp
 )
 
 target_link_libraries(yde LLVM)

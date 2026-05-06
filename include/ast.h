@@ -62,6 +62,8 @@ public:
   virtual MyType getType() = 0;
 
   virtual llvm::Value *getLValue() { return nullptr; }
+
+  MyType ResolvedType = MyType(TypeCategory::Double);
 };
 
 // Expression class for: struct Name { x: double, y: double }
@@ -74,6 +76,10 @@ public:
                       std::vector<std::pair<std::string, MyType>> Members)
       : Name(Name), Members(std::move(Members)) {}
   llvm::Type *codegen();
+  const std::string &getName() const { return Name; };
+  const std::vector<std::pair<std::string, MyType>> &getMembers() const {
+    return Members;
+  }
 };
 
 // Expression class for member access: p.x
@@ -88,6 +94,8 @@ public:
   llvm::Value *codegen() override;
   MyType getType() override;
   llvm::Value *getLValue() override;
+  ExprAST *getStructExpr() const { return StructExpr.get(); }
+  const std::string &getMemberName() const { return MemberName; };
 };
 
 // Expression class for numeric literals.
@@ -110,6 +118,7 @@ public:
   GlobalVarAST(const std::string &Name, MyType Ty, double InitVal)
       : Name(Name), Ty(Ty), InitVal(InitVal) {}
   llvm::Value *codegen() override;
+  std::string getName() { return Name; };
   MyType getType() override { return Ty; }
 };
 
@@ -142,6 +151,8 @@ public:
       : Name(std::move(Name)), Ty(std::move(Ty)), Init(std::move(Init)) {}
   llvm::Value *codegen() override;
   MyType getType() override { return Ty; }
+  ExprAST *getInit() const { return Init.get(); }
+  const std::string &getName() const { return Name; }
 };
 
 // Expression class for referencing variables.
@@ -202,6 +213,8 @@ public:
       : Callee(Callee), Args(std::move(Args)) {}
   llvm::Value *codegen() override;
   MyType getType() override;
+  const std::string &getCallee() const { return Callee; }
+  const std::vector<std::unique_ptr<ExprAST>> &getArgs() const { return Args; }
 };
 
 class PrototypeAST {
@@ -216,6 +229,7 @@ public:
 
   const std::string &getName() const { return Name; }
   llvm::Function *codegen();
+  const std::vector<ArgInfo> &getArguments() const { return Args; }
 
   MyType getArgType(size_t i) const { return Args[i].Type; }
   MyType getRetType() const { return RetType; }
@@ -230,6 +244,8 @@ public:
               std::unique_ptr<ExprAST> Body)
       : Proto(std::move(Proto)), Body(std::move(Body)) {}
   llvm::Function *codegen();
+  const PrototypeAST &getProto() const { return *Proto; }
+  const ExprAST *getBody() const { return Body.get(); }
 };
 
 class IfExprAST : public ExprAST {
@@ -242,21 +258,32 @@ public:
 
   llvm::Value *codegen() override;
   MyType getType() override;
+  ExprAST *getCond() const { return Cond.get(); }
+  ExprAST *getThen() const { return Then.get(); }
+  ExprAST *getElse() const { return Else.get(); }
 };
 
 class ForExprAST : public ExprAST {
   std::string VarName;
+  MyType VarType;
   std::unique_ptr<ExprAST> Start, End, Step, Body;
 
 public:
-  ForExprAST(const std::string &VarName, std::unique_ptr<ExprAST> Start,
-             std::unique_ptr<ExprAST> End, std::unique_ptr<ExprAST> Step,
-             std::unique_ptr<ExprAST> Body)
-      : VarName(VarName), Start(std::move(Start)), End(std::move(End)),
-        Step(std::move(Step)), Body(std::move(Body)) {}
+  ForExprAST(const std::string &VarName, const MyType VarType,
+             std::unique_ptr<ExprAST> Start, std::unique_ptr<ExprAST> End,
+             std::unique_ptr<ExprAST> Step, std::unique_ptr<ExprAST> Body)
+      : VarName(VarName), VarType(VarType), Start(std::move(Start)),
+        End(std::move(End)), Step(std::move(Step)), Body(std::move(Body)) {}
+
+  MyType getVarType() const { return VarType; }
 
   llvm::Value *codegen() override;
   MyType getType() override { return MyType(TypeCategory::Double); }
+  const std::string &getVarName() const { return VarName; }
+  ExprAST *getStart() const { return Start.get(); }
+  ExprAST *getEnd() const { return End.get(); }
+  ExprAST *getStep() const { return Step.get(); }
+  ExprAST *getBody() const { return Body.get(); }
 };
 
 class BlockExprAST : public ExprAST {
@@ -268,6 +295,9 @@ public:
 
   llvm::Value *codegen() override;
   MyType getType() override;
+  const std::vector<std::unique_ptr<ExprAST>> &getExpressions() const {
+    return Expressions;
+  }
 };
 
 #endif // !AST_H

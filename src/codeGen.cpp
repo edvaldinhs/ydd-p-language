@@ -5,8 +5,17 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
+#include <iostream>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
+
+// #define ENABLE_DEBUG
+
+#ifdef ENABLE_DEBUG
+#define DEBUG_MSG(msg) std::cerr << "[CODEGEN] " << msg << std::endl
+#else
+#define DEBUG_MSG(msg)
+#endif
 
 struct SymbolInfo {
   llvm::Value *V;
@@ -163,6 +172,7 @@ llvm::Value *VariableExprAST::getLValue() {
 }
 
 llvm::Value *VariableExprAST::codegen() {
+  DEBUG_MSG("Accessing variable: " << Name);
   auto it = NamedValues.find(Name);
   if (it != NamedValues.end()) {
     llvm::Value *V = it->second.V;
@@ -196,6 +206,7 @@ llvm::Value *UnaryExprAST::getLValue() {
 }
 
 llvm::Value *UnaryExprAST::codegen() {
+  DEBUG_MSG("Unary Op: " << Opcode);
 
   if (Opcode == '&') {
     return Operand->getLValue();
@@ -528,6 +539,7 @@ llvm::Value *GenerateFtoa(llvm::Value *Val) {
 }
 
 llvm::Value *BinaryExprAST::codegen() {
+  DEBUG_MSG("Binary Op: " << Op);
   if (auto *V = dynamic_cast<VariableExprAST *>(LHS.get())) {
   } else if (auto *B = dynamic_cast<BinaryExprAST *>(LHS.get())) {
   }
@@ -810,6 +822,7 @@ MyType CallExprAST::getType() {
 }
 
 llvm::Value *CallExprAST::codegen() {
+  DEBUG_MSG("Calling function: " << Callee);
   if (Callee == "print") {
     llvm::Value *LastSyscallResult = nullptr;
 
@@ -870,6 +883,7 @@ llvm::Value *CallExprAST::codegen() {
 MyType IfExprAST::getType() { return Then->getType(); }
 
 llvm::Value *IfExprAST::codegen() {
+  DEBUG_MSG("Entering IF statement");
   llvm::Value *CondV = Cond->codegen();
   if (!CondV)
     return nullptr;
@@ -925,6 +939,7 @@ llvm::Value *IfExprAST::codegen() {
 }
 
 llvm::Value *ForExprAST::codegen() {
+  DEBUG_MSG("Entering FOR loop: " << VarName);
   llvm::Value *StartVal = Start->codegen();
   if (!StartVal)
     return nullptr;
@@ -1065,6 +1080,7 @@ llvm::Function *PrototypeAST::codegen() {
 }
 
 llvm::Function *FunctionAST::codegen() {
+  DEBUG_MSG("Compiling Function: " << Proto->getName());
   auto &P = *Proto;
   FunctionProtos[P.getName()] = std::move(Proto);
   llvm::Function *TheFunction = getFunction(P.getName());
