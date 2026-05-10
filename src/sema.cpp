@@ -59,7 +59,14 @@ void SemanticAnalyzer::Analyze(ExprAST *Node) {
   } else if (auto *Mem = dynamic_cast<MemberAccessExprAST *>(Node)) {
     DEBUG_MSG("Type-checking MemberAcess: " << Mem->getMemberName());
     AnalyzeMemberAccess(Mem);
+  } else if (auto *Asm = dynamic_cast<AsmExprAST *>(Node)) {
+    DEBUG_MSG("Type-checking Asm");
+    AnalyzeInlineAssembly(Asm);
   }
+}
+
+void SemanticAnalyzer::AnalyzeInlineAssembly(AsmExprAST *Node) {
+  Node->ResolvedType = MyType(TypeCategory::Int);
 }
 
 void SemanticAnalyzer::AnalyzeString(StringExprAST *Node) {

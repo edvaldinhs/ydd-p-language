@@ -32,6 +32,7 @@ public:
   void AnalyzeFor(ForExprAST *Node);
   void AnalyzeBlock(BlockExprAST *Node);
   void AnalyzeVarExpr(VarExprAST *Node);
+  void AnalyzeInlineAssembly(AsmExprAST *Node);
   void AnalyzeMemberAccess(MemberAccessExprAST *Node);
   void AnalyzeUnary(UnaryExprAST *Node);
 

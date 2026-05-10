@@ -38,8 +38,9 @@ extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
 #include "llvm/TargetParser/Host.h"
 
 void EmitObjectFile() {
-  auto TargetTripleStr = llvm::sys::getDefaultTargetTriple();
-  llvm::Triple TargetTriple(TargetTripleStr);
+  // 1. Create a formal Triple object immediately
+  std::string TripleStr = "x86_64-pc-none-elf";
+  llvm::Triple TargetTriple(TripleStr);
 
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargets();
@@ -48,7 +49,7 @@ void EmitObjectFile() {
   llvm::InitializeAllAsmPrinters();
 
   std::string Error;
-  auto Target = llvm::TargetRegistry::lookupTarget(TargetTriple, Error);
+  auto Target = llvm::TargetRegistry::lookupTarget("", TargetTriple, Error);
 
   if (!Target) {
     llvm::errs() << Error;
@@ -57,16 +58,25 @@ void EmitObjectFile() {
 
   auto CPU = "generic";
   auto Features = "";
+
   llvm::TargetOptions opt;
 
-  auto RM = std::optional<llvm::Reloc::Model>();
+  auto RM = std::optional<llvm::Reloc::Model>(llvm::Reloc::Static);
+
   auto TheTargetMachine =
       Target->createTargetMachine(TargetTriple, CPU, Features, opt, RM);
 
   TheModule->setDataLayout(TheTargetMachine->createDataLayout());
+
   TheModule->setTargetTriple(TargetTriple);
 
-  auto Filename = "output.o";
+  for (auto &F : *TheModule) {
+    F.addFnAttr(llvm::Attribute::NoRedZone);
+    F.addFnAttr(llvm::Attribute::NoUnwind);
+    F.addFnAttr("disable-tail-calls", "true");
+  }
+
+  auto Filename = "kernel.o";
   std::error_code EC;
   llvm::raw_fd_ostream dest(Filename, EC, llvm::sys::fs::OF_None);
 
@@ -85,8 +95,9 @@ void EmitObjectFile() {
 
   pass.run(*TheModule);
   dest.flush();
-  std::cout << "Wrote " << Filename << "\n";
+  std::cout << "Wrote bare-metal object to " << Filename << "\n";
 }
+
 int main(int argc, char **argv) {
   if (argc > 1) {
     if (!freopen(argv[1], "r", stdin)) {

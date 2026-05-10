@@ -1,6 +1,6 @@
 int g = 6;
 
-fun sum(x, y, z) {
+fun int sum(x, y, z) {
     x+y+z;
 }
 

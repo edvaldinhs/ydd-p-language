@@ -1,6 +1,6 @@
 # Here's how for loops work in yde
 
-fun multiply(x, y) {
+fun int multiply(x, y) {
   int result = x;
 
   # for loop

@@ -1,6 +1,6 @@
 # fun divide function
 
-fun divideiter(x, y, low, high) {
+fun double divideiter(x, y, low, high) {
     for i = 0, i < 40, 1 in {
         if (((low + high) * 0.5) * y) < x then {
             low = (low + high) * 0.5;
@@ -11,7 +11,7 @@ fun divideiter(x, y, low, high) {
     low;
 }
 
-fun divide(x, y) {
+fun double divide(x, y) {
     divideiter(x, y, 0.0, 1000.0);
 }
 
