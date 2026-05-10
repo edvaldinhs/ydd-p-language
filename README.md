@@ -62,6 +62,11 @@ $ ./setup.sh
 $ ./yde ../examples/for.yde
 ```
 
+if you want to compile to a .o file
+```bash
+$ ./yde ../examples/for.yde -o file
+```
+
 Or build the project manually:
 
 ```bash

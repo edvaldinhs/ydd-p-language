@@ -14,6 +14,7 @@ fun globalVar(){
   # The variables til now were globals
   # in the code context...
 
+
   print("Global Vars: ");
   print(gVarA + "\n");
   print(gVarB + "\n");

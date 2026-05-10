@@ -51,6 +51,8 @@ int gettok() {
       return tok_asm;
     if (IdentifierStr == "void")
       return tok_void;
+    if (IdentifierStr == "while")
+      return tok_while;
     return tok_identifier;
   }
 
@@ -62,7 +64,24 @@ int gettok() {
   if (isdigit(LastChar) || LastChar == '.') {
     std::string NumStr;
     bool hasDot = false;
-    do {
+
+    if (LastChar == '0') {
+      NumStr += LastChar;
+      LastChar = getchar();
+      if (LastChar == 'x' || LastChar == 'X') {
+        NumStr += LastChar;
+        LastChar = getchar();
+        while (isxdigit(LastChar)) {
+          NumStr += LastChar;
+          LastChar = getchar();
+        }
+        CurCol += NumStr.length();
+        NumVal = (double)strtoll(NumStr.c_str(), nullptr, 16);
+        return tok_number;
+      }
+    }
+
+    while (isdigit(LastChar) || LastChar == '.') {
       if (LastChar == '.') {
         if (hasDot)
           break;
@@ -70,7 +89,7 @@ int gettok() {
       }
       NumStr += LastChar;
       LastChar = getchar();
-    } while (isdigit(LastChar) || LastChar == '.');
+    }
 
     NumVal = strtod(NumStr.c_str(), nullptr);
     return tok_number;
@@ -121,6 +140,26 @@ int gettok() {
 
   if (LastChar == EOF)
     return tok_eof;
+
+  if (LastChar == '!') {
+    LastChar = getchar();
+    if (LastChar == '=') {
+      LastChar = getchar();
+      CurCol++;
+      return tok_neq;
+    }
+    return '!';
+  }
+
+  if (LastChar == '=') {
+    LastChar = getchar();
+    if (LastChar == '=') {
+      LastChar = getchar();
+      CurCol++;
+      return tok_eqeq;
+    }
+    return '=';
+  }
 
   int ThisChar = LastChar;
   LastChar = getchar();

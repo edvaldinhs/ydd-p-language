@@ -22,6 +22,7 @@ enum Token {
 
   // for loop
   tok_for = -9,
+  tok_while = -17,
   tok_in = -10,
 
   // types
@@ -34,6 +35,9 @@ enum Token {
   // ascii friends
   tok_char = -14,
   tok_string = -15,
+
+  tok_neq = -19,  // !=
+  tok_eqeq = -20, // ==
 
   tok_asm = -16,
 };

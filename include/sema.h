@@ -30,6 +30,7 @@ public:
   void AnalyzeCall(CallExprAST *Node);
   void AnalyzeIf(IfExprAST *Node);
   void AnalyzeFor(ForExprAST *Node);
+  void AnalyzeWhile(WhileExprAST *Node);
   void AnalyzeBlock(BlockExprAST *Node);
   void AnalyzeVarExpr(VarExprAST *Node);
   void AnalyzeInlineAssembly(AsmExprAST *Node);

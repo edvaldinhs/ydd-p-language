@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+extern bool EmitObject;
+
 enum class TypeKind { Double, Int };
 
 struct VarType {
@@ -167,6 +169,21 @@ public:
   llvm::Value *getLValue() override;
 };
 
+// Expression class for while loops.
+class WhileExprAST : public ExprAST {
+  std::unique_ptr<ExprAST> Cond, Body;
+
+public:
+  WhileExprAST(std::unique_ptr<ExprAST> Cond, std::unique_ptr<ExprAST> Body)
+      : Cond(std::move(Cond)), Body(std::move(Body)) {}
+  llvm::Value *codegen() override;
+  MyType getType() override {
+    return Body ? Body->getType() : MyType(TypeCategory::Double);
+  }
+  ExprAST *getCond() const { return Cond.get(); }
+  ExprAST *getBody() const { return Body.get(); }
+};
+
 // Expression class for strings : ).
 class StringExprAST : public ExprAST {
   std::string Val;
@@ -176,7 +193,7 @@ public:
   llvm::Value *codegen() override;
   size_t getLength() const { return Val.length(); }
   MyType getType() override {
-    MyType T(TypeCategory::Int);
+    MyType T(TypeCategory::Char);
     T.PointerLevel = 1;
     return T;
   }
@@ -184,14 +201,14 @@ public:
 
 // Expression class for a binary operator.
 class BinaryExprAST : public ExprAST {
-  char Op;
+  int Op;
   std::unique_ptr<ExprAST> LHS, RHS;
 
 public:
-  BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
+  BinaryExprAST(int Op, std::unique_ptr<ExprAST> LHS,
                 std::unique_ptr<ExprAST> RHS)
       : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
-  char &getOp() { return Op; };
+  int &getOp() { return Op; };
   std::unique_ptr<ExprAST> &getLHS() { return LHS; };
   std::unique_ptr<ExprAST> &getRHS() { return RHS; };
 
