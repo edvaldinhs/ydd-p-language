@@ -1,27 +1,29 @@
 # You can create a function like this
-# fun name(param a, param b) return;
+# fun type name(param a, param b) return;
 
 # the ';' is optional in this case
-fun returnOne() 1
+fun int returnOne() 1
 
-# You can even declare its variable
-# The default is double in this version...
-fun int Two() 2
+# it accepts double type as well!!
+fun double Two() 2
 
 # It accepts the () context
-fun Three() (3)
+fun int Three() (3)
 
 # If we use brackets the ';' is now
 # mandatory inside the context of {}
-fun Four() {4;}
+fun int Four() {4;}
 
 # the params can be declared like this
-fun param(a, double b, int c){
+fun double param(a, double b, int c){
     (a + b + c);
   }
 
+# default type is void
+fun HelloWorld(k:char*) {print(k);}
+
 # Funny recursive fibonnaci value finder
-fun fib(int x)
+fun int fib(int x)
   if x < 3 then 1
 
   # This is how we call the functions
@@ -40,5 +42,7 @@ fun main(){
   print(fib(5) + "\n\n");
 
   print("param(1, Two(), Three()):\n");
-  print(param(1, Two(), Three()) + "\n");
+  print(param(1, Two(), Three()) + "\n\n");
+
+  HelloWorld("print()");
 }

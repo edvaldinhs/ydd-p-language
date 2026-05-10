@@ -47,6 +47,10 @@ int gettok() {
       return tok_double;
     if (IdentifierStr == "char")
       return tok_char;
+    if (IdentifierStr == "asm")
+      return tok_asm;
+    if (IdentifierStr == "void")
+      return tok_void;
     return tok_identifier;
   }
 

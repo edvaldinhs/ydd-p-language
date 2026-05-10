@@ -24,16 +24,18 @@ enum Token {
   tok_for = -9,
   tok_in = -10,
 
-  // numbers
+  // types
   tok_int = -11,
   tok_double = -12,
+  tok_void = -17,
 
-  // bro, just read...
   tok_struct = -13,
 
   // ascii friends
   tok_char = -14,
   tok_string = -15,
+
+  tok_asm = -16,
 };
 
 extern std::string IdentifierStr;

@@ -63,6 +63,8 @@ llvm::Type *getLLVMType(MyType T) {
   llvm::Type *BaseTy = nullptr;
 
   switch (T.Category) {
+  case TypeCategory::Void:
+    return llvm::Type::getVoidTy(*TheContext);
   case TypeCategory::Char:
     BaseTy = llvm::Type::getInt8Ty(*TheContext);
     break;
@@ -169,6 +171,16 @@ llvm::Value *VariableExprAST::getLValue() {
   fprintf(stderr, "Error [Line %d, Col %d]: Unknown variable name %s\n",
           CurLine, CurCol, Name.c_str());
   return nullptr;
+}
+
+llvm::Value *AsmExprAST::codegen() {
+  llvm::FunctionType *FTy =
+      llvm::FunctionType::get(llvm::Type::getVoidTy(*TheContext), false);
+
+  llvm::InlineAsm *IA = llvm::InlineAsm::get(FTy, AsmString, Constraints, true);
+
+  TheBuilder->CreateCall(FTy, IA);
+  return llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
 }
 
 llvm::Value *VariableExprAST::codegen() {
@@ -1108,12 +1120,20 @@ llvm::Function *FunctionAST::codegen() {
     Idx++;
   }
 
-  if (llvm::Value *RetVal = Body->codegen()) {
-    RetVal = EmitCast(RetVal, TheFunction->getReturnType());
-
-    TheBuilder->CreateRet(RetVal);
+  if (P.getRetType().Category == TypeCategory::Void) {
+    if (Body) {
+      Body->codegen();
+    }
+    TheBuilder->CreateRetVoid();
     llvm::verifyFunction(*TheFunction);
     return TheFunction;
+  } else {
+    if (llvm::Value *RetVal = Body->codegen()) {
+      RetVal = EmitCast(RetVal, TheFunction->getReturnType());
+      TheBuilder->CreateRet(RetVal);
+      llvm::verifyFunction(*TheFunction);
+      return TheFunction;
+    }
   }
 
   TheFunction->eraseFromParent();

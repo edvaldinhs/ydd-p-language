@@ -17,7 +17,7 @@ struct VarType {
   TypeKind Kind;
 };
 
-enum class TypeCategory { Int, Double, Struct, Char };
+enum class TypeCategory { Int, Double, Struct, Char, Void };
 
 struct MyType {
   TypeCategory Category;
@@ -261,6 +261,19 @@ public:
   ExprAST *getCond() const { return Cond.get(); }
   ExprAST *getThen() const { return Then.get(); }
   ExprAST *getElse() const { return Else.get(); }
+};
+
+class AsmExprAST : public ExprAST {
+  std::string AsmString;
+  std::string Constraints;
+
+public:
+  AsmExprAST(const std::string &AsmString, const std::string &Constraints)
+      : AsmString(AsmString), Constraints(Constraints) {}
+
+  llvm::Value *codegen() override;
+
+  MyType getType() override { return MyType(TypeCategory::Void); }
 };
 
 class ForExprAST : public ExprAST {

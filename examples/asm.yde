@@ -1,0 +1,11 @@
+# Inline assembly feature
+
+fun main() {
+    # Halt the CPU with inline assembly feature
+    #
+    # asm("hlt", ""); # !!
+    # 
+    # we won't do this here cuz its still jit
+    # and we need to use a virtual machine for these
+    # kind of things
+}

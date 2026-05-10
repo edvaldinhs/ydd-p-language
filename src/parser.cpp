@@ -134,6 +134,9 @@ static MyType ParseType() {
   } else if (CurTok == tok_double) {
     Ty = MyType(TypeCategory::Double);
     getNextToken();
+  } else if (CurTok == tok_void) {
+    Ty = MyType(TypeCategory::Void);
+    getNextToken();
   } else if (CurTok == tok_identifier) {
     Ty = MyType(TypeCategory::Struct, IdentifierStr);
     getNextToken();
@@ -400,7 +403,7 @@ static ArgInfo ParseArgument() {
 }
 
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
-  MyType RetType = MyType(TypeCategory::Double);
+  MyType RetType = MyType(TypeCategory::Void);
   if (CurTok == tok_int || CurTok == tok_double) {
     RetType = (CurTok == tok_int) ? MyType(TypeCategory::Int)
                                   : MyType(TypeCategory::Double);
@@ -495,6 +498,32 @@ static std::unique_ptr<ExprAST> ParseStringExpr() {
   return Result;
 }
 
+static std::unique_ptr<ExprAST> ParseAsmExpr() {
+  getNextToken();
+
+  if (!Expect('(', "after 'asm'"))
+    return nullptr;
+  if (CurTok != tok_string)
+    return LogError("Expected string literal for asm instruction");
+
+  std::string AsmCode = IdentifierStr;
+  getNextToken();
+
+  std::string Constraints = "";
+  if (CurTok == ',') {
+    getNextToken();
+    if (CurTok != tok_string)
+      return LogError("Expected string literal for asm constraints");
+    Constraints = IdentifierStr;
+    getNextToken();
+  }
+
+  if (!Expect(')', "to close asm expression"))
+    return nullptr;
+
+  return std::make_unique<AsmExprAST>(AsmCode, Constraints);
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() {
   DEBUG_MSG("Parsing Primary Expression");
   switch (CurTok) {
@@ -510,6 +539,9 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
     return ParseIfExpr();
   case tok_for:
     return ParseForExpr();
+  case tok_asm:
+    DEBUG_MSG("Parsing Asm Expression");
+    return ParseAsmExpr();
   case tok_char:
   case tok_int:
   case tok_double:
