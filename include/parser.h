@@ -8,7 +8,7 @@
 
 // Global state for the parser
 extern int CurTok;
-extern std::map<char, int> BinopPrecedence;
+extern std::map<int, int> BinopPrecedence;
 
 int getNextToken();
 void SetupPrecedence();

@@ -62,7 +62,15 @@ void SemanticAnalyzer::Analyze(ExprAST *Node) {
   } else if (auto *Asm = dynamic_cast<AsmExprAST *>(Node)) {
     DEBUG_MSG("Type-checking Asm");
     AnalyzeInlineAssembly(Asm);
+  } else if (auto *While = dynamic_cast<WhileExprAST *>(Node)) {
+    AnalyzeWhile(While);
   }
+}
+
+void SemanticAnalyzer::AnalyzeWhile(WhileExprAST *Node) {
+  Analyze(Node->getCond());
+  Analyze(Node->getBody());
+  Node->ResolvedType = Node->getBody()->ResolvedType;
 }
 
 void SemanticAnalyzer::AnalyzeInlineAssembly(AsmExprAST *Node) {
@@ -177,6 +185,16 @@ void SemanticAnalyzer::AnalyzeBinary(BinaryExprAST *Node) {
 
   if (Node->getOp() == '=') {
     Node->ResolvedType = L;
+    return;
+  }
+
+  bool LIsString = (L.Category == TypeCategory::Char && L.PointerLevel > 0);
+  bool RIsString = (R.Category == TypeCategory::Char && R.PointerLevel > 0);
+
+  if (Node->getOp() == '+' && (LIsString || RIsString)) {
+    MyType StrTy(TypeCategory::Char);
+    StrTy.PointerLevel = 1;
+    Node->ResolvedType = StrTy;
     return;
   }
 

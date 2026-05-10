@@ -20,7 +20,7 @@ extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
 extern std::map<std::string, llvm::StructType *> StructTypeMap;
 
 int CurTok;
-std::map<char, int> BinopPrecedence;
+std::map<int, int> BinopPrecedence;
 
 extern int CurLine;
 extern int CurCol;
@@ -114,8 +114,6 @@ bool Expect(int ExpectedTok, const std::string &Context) {
 static int GetTokPrecedence() {
   //  if (CurTok == '*')
   //    return -1;
-  if (!isascii(CurTok))
-    return -1;
   int TokPrec = BinopPrecedence[CurTok];
   if (TokPrec <= 0)
     return -1;
@@ -314,6 +312,21 @@ static std::unique_ptr<ExprAST> ParseIfExpr() {
                                      std::move(Else));
 }
 
+static std::unique_ptr<ExprAST> ParseWhileExpr() {
+  getNextToken();
+  if (!Expect('(', "after 'while'"))
+    return nullptr;
+  auto Cond = ParseExpression();
+  if (!Cond)
+    return nullptr;
+  if (!Expect(')', "after 'while' condition"))
+    return nullptr;
+  auto Body = ParseExpression();
+  if (!Body)
+    return nullptr;
+  return std::make_unique<WhileExprAST>(std::move(Cond), std::move(Body));
+}
+
 static std::unique_ptr<ExprAST> ParseForExpr() {
   getNextToken();
 
@@ -387,36 +400,52 @@ static std::unique_ptr<ExprAST> ParseBlockExpr() {
 
 static ArgInfo ParseArgument() {
   MyType Ty = MyType(TypeCategory::Double);
-  if (CurTok == tok_int || CurTok == tok_double) {
-    Ty = (CurTok == tok_int) ? TypeCategory::Int : TypeCategory::Double;
-    getNextToken();
-  }
-  if (CurTok != tok_identifier)
-    return (LogError("Expected argument name"), ArgInfo{});
-  std::string Name = IdentifierStr;
-  getNextToken();
-  if (CurTok == ':') {
-    getNextToken();
+  std::string Name;
+
+  if (CurTok == tok_int || CurTok == tok_double || CurTok == tok_char ||
+      (CurTok == tok_identifier && StructTypeMap.count(IdentifierStr))) {
     Ty = ParseType();
+    if (CurTok != tok_identifier) {
+      LogError("Expected argument name");
+      return ArgInfo{};
+    }
+    Name = IdentifierStr;
+    getNextToken();
+  } else if (CurTok == tok_identifier) {
+    Name = IdentifierStr;
+    getNextToken();
+    if (CurTok == ':') {
+      getNextToken();
+      Ty = ParseType();
+    }
+  } else {
+    LogError("Expected argument name or type");
+    return ArgInfo{};
   }
+
   return {Name, Ty};
 }
 
 static std::unique_ptr<PrototypeAST> ParsePrototype() {
   MyType RetType = MyType(TypeCategory::Void);
-  if (CurTok == tok_int || CurTok == tok_double) {
-    RetType = (CurTok == tok_int) ? MyType(TypeCategory::Int)
-                                  : MyType(TypeCategory::Double);
-    getNextToken();
-  }
+  std::string FnName;
 
-  if (CurTok != tok_identifier) {
+  if (CurTok == tok_int || CurTok == tok_double || CurTok == tok_char ||
+      CurTok == tok_void) {
+    RetType = ParseType();
+    if (CurTok != tok_identifier) {
+      LogError("Expected function name");
+      return nullptr;
+    }
+    FnName = IdentifierStr;
+    getNextToken();
+  } else if (CurTok == tok_identifier) {
+    FnName = IdentifierStr;
+    getNextToken();
+  } else {
     LogError("Expected function name in prototype");
     return nullptr;
   }
-
-  std::string FnName = IdentifierStr;
-  getNextToken();
 
   if (!Expect('(', "after function name"))
     return nullptr;
@@ -428,7 +457,6 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
       if (Arg.Name.empty())
         return nullptr;
       Args.push_back(Arg);
-
       if (CurTok == ')')
         break;
       if (!Expect(',', "between arguments"))
@@ -436,6 +464,11 @@ static std::unique_ptr<PrototypeAST> ParsePrototype() {
     }
   }
   getNextToken();
+
+  if (CurTok == ':') {
+    getNextToken();
+    RetType = ParseType();
+  }
 
   return std::make_unique<PrototypeAST>(FnName, std::move(Args), RetType);
 }
@@ -537,6 +570,8 @@ static std::unique_ptr<ExprAST> ParsePrimary() {
   }
   case tok_if:
     return ParseIfExpr();
+  case tok_while:
+    return ParseWhileExpr();
   case tok_for:
     return ParseForExpr();
   case tok_asm:
@@ -623,6 +658,8 @@ void SetupPrecedence() {
   BinopPrecedence[';'] = -1;
   BinopPrecedence['.'] = 100;
   BinopPrecedence['='] = 5;
+  BinopPrecedence[tok_eqeq] = 10; // ==
+  BinopPrecedence[tok_neq] = 10;  // !=
   BinopPrecedence['<'] = 10;
   BinopPrecedence['+'] = 20;
   BinopPrecedence['-'] = 20;

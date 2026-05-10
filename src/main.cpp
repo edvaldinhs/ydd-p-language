@@ -11,10 +11,10 @@
 
 #include "llvm/ExecutionEngine/Orc/LLJIT.h"
 #include "llvm/ExecutionEngine/Orc/ThreadSafeModule.h"
-#include "llvm/Support/TargetSelect.h"
 
 #include "llvm/Support/raw_ostream.h"
 #include <iostream>
+#include <string>
 
 #include <cstdio>
 #include <llvm/ExecutionEngine/JITSymbol.h>
@@ -22,24 +22,17 @@
 #include <llvm/ExecutionEngine/Orc/CoreContainers.h>
 #include <llvm/ExecutionEngine/Orc/Shared/ExecutorSymbolDef.h>
 
-extern "C" double printd(double X) {
-  fprintf(stderr, "%f\n", X);
-  return 0;
-}
-
 extern std::unique_ptr<llvm::LLVMContext> TheContext;
 extern std::unique_ptr<llvm::Module> TheModule;
 extern std::unique_ptr<llvm::IRBuilder<>> TheBuilder;
 
 #include "llvm/IR/LegacyPassManager.h"
-#include "llvm/MC/TargetRegistry.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Target/TargetMachine.h"
 #include "llvm/TargetParser/Host.h"
 
-void EmitObjectFile() {
-  // 1. Create a formal Triple object immediately
-  std::string TripleStr = "x86_64-pc-none-elf";
+bool EmitObject = false;
+
+void EmitObjectFile(const std::string &Filename) {
+  std::string TripleStr = "i386-pc-none-elf";
   llvm::Triple TargetTriple(TripleStr);
 
   llvm::InitializeAllTargetInfos();
@@ -56,7 +49,7 @@ void EmitObjectFile() {
     return;
   }
 
-  auto CPU = "generic";
+  auto CPU = "i686";
   auto Features = "";
 
   llvm::TargetOptions opt;
@@ -67,7 +60,6 @@ void EmitObjectFile() {
       Target->createTargetMachine(TargetTriple, CPU, Features, opt, RM);
 
   TheModule->setDataLayout(TheTargetMachine->createDataLayout());
-
   TheModule->setTargetTriple(TargetTriple);
 
   for (auto &F : *TheModule) {
@@ -76,7 +68,6 @@ void EmitObjectFile() {
     F.addFnAttr("disable-tail-calls", "true");
   }
 
-  auto Filename = "kernel.o";
   std::error_code EC;
   llvm::raw_fd_ostream dest(Filename, EC, llvm::sys::fs::OF_None);
 
@@ -95,12 +86,30 @@ void EmitObjectFile() {
 
   pass.run(*TheModule);
   dest.flush();
-  std::cout << "Wrote bare-metal object to " << Filename << "\n";
+  std::cout << "Wrote 32-bit bare-metal object to " << Filename << "\n";
 }
 
 int main(int argc, char **argv) {
-  if (argc > 1) {
-    if (!freopen(argv[1], "r", stdin)) {
+  std::string InputFile = "";
+  std::string OutputFile = "";
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    if (arg == "-o") {
+      if (i + 1 < argc) {
+        OutputFile = argv[++i];
+        EmitObject = true;
+      } else {
+        OutputFile = "kernel";
+        EmitObject = true;
+      }
+    } else {
+      InputFile = arg;
+    }
+  }
+
+  if (!InputFile.empty()) {
+    if (!freopen(InputFile.c_str(), "r", stdin)) {
       perror("Could not open file");
       return 1;
     }
@@ -114,6 +123,7 @@ int main(int argc, char **argv) {
   TheContext = std::make_unique<llvm::LLVMContext>();
   TheModule = std::make_unique<llvm::Module>("MyJIT", *TheContext);
   TheBuilder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
+
   auto ExitOnErr = llvm::ExitOnError();
   auto TheJIT = ExitOnErr(llvm::orc::LLJITBuilder().create());
 
@@ -122,16 +132,10 @@ int main(int argc, char **argv) {
           TheJIT->getDataLayout().getGlobalPrefix())));
 
   llvm::orc::SymbolMap Symbols;
-
-  Symbols[TheJIT->mangleAndIntern("printd")] = {
-      llvm::orc::ExecutorAddr::fromPtr(&printd),
-      llvm::JITSymbolFlags::Exported};
-
   ExitOnErr(TheJIT->getMainJITDylib().define(
       llvm::orc::absoluteSymbols(std::move(Symbols))));
 
   getNextToken();
-
   SemanticAnalyzer Sema;
 
   while (CurTok != tok_eof) {
@@ -176,13 +180,17 @@ int main(int argc, char **argv) {
         if (auto GlobalAST = ParseGlobal()) {
           Sema.DeclareVariable(GlobalAST->getName(), GlobalAST->getType());
           Sema.Analyze(GlobalAST.get());
-
           GlobalAST->codegen();
         }
       } else {
         if (auto FnAST = ParseTopLevelExpr()) {
           Sema.AnalyzeFunction(FnAST.get());
-          FnAST->codegen();
+
+          if (auto *FnIR = FnAST->codegen()) {
+            FnIR->viewCFG();
+          }
+        } else {
+          getNextToken();
         }
       }
       break;
@@ -201,14 +209,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  auto TSM =
-      llvm::orc::ThreadSafeModule(std::move(TheModule), std::move(TheContext));
-  ExitOnErr(TheJIT->addIRModule(std::move(TSM)));
+  if (EmitObject) {
+    EmitObjectFile(OutputFile + ".o");
+  } else {
+    auto TSM = llvm::orc::ThreadSafeModule(std::move(TheModule),
+                                           std::move(TheContext));
+    ExitOnErr(TheJIT->addIRModule(std::move(TSM)));
 
-  auto MainSymbol = TheJIT->lookup("main");
-  if (MainSymbol) {
-    auto (*FP)() = MainSymbol->toPtr<double (*)()>();
-    FP();
+    auto MainSymbol = TheJIT->lookup("main");
+    if (MainSymbol) {
+      auto (*FP)() = MainSymbol->toPtr<double (*)()>();
+      FP();
+    }
   }
 
   return 0;

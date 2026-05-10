@@ -1,11 +1,11 @@
 #include "../include/ast.h"
+#include "../include/lexer.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
-#include <iostream>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 
@@ -28,7 +28,7 @@ std::unique_ptr<llvm::Module> TheModule;
 std::map<std::string, SymbolInfo> NamedValues;
 
 std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
-std::map<std::string, llvm::GlobalVariable *> GlobalValues;
+std::map<std::string, SymbolInfo> GlobalValues;
 
 std::map<std::string, StructInfo> StructDefs;
 std::map<std::string, llvm::StructType *> StructTypeMap;
@@ -92,6 +92,21 @@ llvm::Value *EmitCast(llvm::Value *V, llvm::Type *DestTy) {
   llvm::Type *SrcTy = V->getType();
   if (SrcTy == DestTy)
     return V;
+
+  if (DestTy->isPointerTy() && SrcTy->isDoubleTy()) {
+    V = TheBuilder->CreateFPToUI(V, llvm::Type::getInt32Ty(*TheContext),
+                                 "ptrcast_tmp");
+    return TheBuilder->CreateIntToPtr(V, DestTy, "inttoptr");
+  }
+
+  if (SrcTy->isIntegerTy() && DestTy->isPointerTy())
+    return TheBuilder->CreateIntToPtr(V, DestTy, "inttoptr");
+
+  if (SrcTy->isPointerTy() && DestTy->isIntegerTy())
+    return TheBuilder->CreatePtrToInt(V, DestTy, "ptrtoint");
+
+  if (SrcTy->isIntegerTy() && DestTy->isIntegerTy())
+    return TheBuilder->CreateIntCast(V, DestTy, true, "intcast");
   if (SrcTy->isIntegerTy() && DestTy->isDoubleTy())
     return TheBuilder->CreateSIToFP(V, DestTy, "itofp");
   if (SrcTy->isDoubleTy() && DestTy->isIntegerTy())
@@ -155,22 +170,23 @@ std::string ProcessEscapeSequences(const std::string &input) {
 MyType VariableExprAST::getType() {
   if (NamedValues.count(Name))
     return NamedValues[Name].Type;
+
+  if (GlobalValues.count(Name))
+    return GlobalValues[Name].Type;
+
   return MyType(TypeCategory::Double);
 }
+
 llvm::Value *VariableExprAST::getLValue() {
-
   auto it = NamedValues.find(Name);
-  if (it != NamedValues.end()) {
+  if (it != NamedValues.end())
     return it->second.V;
+
+  if (llvm::GlobalVariable *G = TheModule->getNamedGlobal(Name)) {
+    return G;
   }
 
-  if (GlobalValues.count(Name)) {
-    return GlobalValues[Name];
-  }
-
-  fprintf(stderr, "Error [Line %d, Col %d]: Unknown variable name %s\n",
-          CurLine, CurCol, Name.c_str());
-  return nullptr;
+  return LogErrorV("Unknown variable name");
 }
 
 llvm::Value *AsmExprAST::codegen() {
@@ -291,11 +307,17 @@ MyType BinaryExprAST::getType() {
   MyType L = LHS->getType();
   MyType R = RHS->getType();
 
+  bool LIsString = (L.Category == TypeCategory::Char && L.PointerLevel > 0);
+  bool RIsString = (R.Category == TypeCategory::Char && R.PointerLevel > 0);
+
   if (Op == '+') {
-    if (L.PointerLevel > 0 || R.PointerLevel > 0) {
-      MyType StrTy(TypeCategory::Int);
+    if (LIsString || RIsString) {
+      MyType StrTy(TypeCategory::Char);
       StrTy.PointerLevel = 1;
       return StrTy;
+    }
+    if (L.PointerLevel > 0 || R.PointerLevel > 0) {
+      return (L.PointerLevel > 0) ? L : R;
     }
   }
   if (L.Category == TypeCategory::Double || R.Category == TypeCategory::Double)
@@ -551,30 +573,19 @@ llvm::Value *GenerateFtoa(llvm::Value *Val) {
 }
 
 llvm::Value *BinaryExprAST::codegen() {
-  DEBUG_MSG("Binary Op: " << Op);
-  if (auto *V = dynamic_cast<VariableExprAST *>(LHS.get())) {
-  } else if (auto *B = dynamic_cast<BinaryExprAST *>(LHS.get())) {
-  }
   if (Op == '=') {
-    if (auto *U = dynamic_cast<UnaryExprAST *>(LHS.get())) {
-    } else if (auto *B = dynamic_cast<BinaryExprAST *>(LHS.get())) {
-    } else if (auto *V = dynamic_cast<VariableExprAST *>(LHS.get())) {
-    }
-
     llvm::Value *LHSAddr = LHS->getLValue();
-    if (!LHSAddr) {
-      return LogErrorV("Destination of '=' must be an L-Value (Cannot assign "
-                       "to this expression)");
-    }
+    if (!LHSAddr)
+      return LogErrorV("Destination of '=' must be an L-Value");
 
     llvm::Value *Val = RHS->codegen();
-    if (!Val) {
+    if (!Val)
       return nullptr;
-    }
 
     Val = EmitCast(Val, getLLVMType(LHS->getType()));
-    TheBuilder->CreateStore(Val, LHSAddr);
 
+    auto *Store = TheBuilder->CreateStore(Val, LHSAddr);
+    Store->setVolatile(true);
     return Val;
   }
 
@@ -590,52 +601,83 @@ llvm::Value *BinaryExprAST::codegen() {
   if (!L || !R)
     return nullptr;
 
+  llvm::Type *LTy = L->getType();
+  llvm::Type *RTy = R->getType();
+  bool LIsPtr = LTy->isPointerTy();
+  bool RIsPtr = RTy->isPointerTy();
+
+  MyType LType = LHS->getType();
+  MyType RType = RHS->getType();
+  bool LIsString =
+      (LType.Category == TypeCategory::Char && LType.PointerLevel > 0);
+  bool RIsString =
+      (RType.Category == TypeCategory::Char && RType.PointerLevel > 0);
+
   if (Op == '+') {
-    llvm::Type *LTy = L->getType();
-    llvm::Type *RTy = R->getType();
+    if ((LIsPtr && !RIsPtr) || (!LIsPtr && RIsPtr)) {
+      llvm::Value *Ptr = LIsPtr ? L : R;
+      llvm::Value *Idx = LIsPtr ? R : L;
 
-    bool LIsPtr = LTy->isPointerTy();
-    bool RIsPtr = RTy->isPointerTy();
-
-    if (LIsPtr || RIsPtr) {
-      llvm::Value *LFinal = L;
-      llvm::Value *RFinal = R;
-
-      if (!LIsPtr) {
-        if (LTy->isDoubleTy())
-          LFinal = GenerateFtoa(L);
-        else
-          LFinal = std::get<0>(GenerateItoa(
-              TheBuilder->CreateTrunc(L, llvm::Type::getInt32Ty(*TheContext))));
+      if (Idx->getType()->isIntegerTy()) {
+        if (EmitObject || (!LIsString && !RIsString)) {
+          llvm::Value *IntIdx =
+              EmitCast(Idx, llvm::Type::getInt32Ty(*TheContext));
+          return TheBuilder->CreateInBoundsGEP(
+              llvm::Type::getInt8Ty(*TheContext), Ptr, IntIdx, "ptradd");
+        }
       }
-
-      if (!RIsPtr) {
-        if (RTy->isDoubleTy())
-          RFinal = GenerateFtoa(R);
-        else
-          RFinal = std::get<0>(GenerateItoa(
-              TheBuilder->CreateTrunc(R, llvm::Type::getInt32Ty(*TheContext))));
-      }
-
-      return GenerateStrCat(LFinal, RFinal);
     }
+
+    if (LIsString || RIsString) {
+      if (EmitObject) {
+        return LogErrorV("Error: Dynamic string concatenation is not "
+                         "supported in kernel-space.");
+      }
+
+      llvm::Value *LStr = L;
+      if (!LIsString) {
+        if (LTy->isDoubleTy())
+          LStr = GenerateFtoa(L);
+        else
+          LStr = GenerateItoa(EmitCast(L, llvm::Type::getInt32Ty(*TheContext)))
+                     .first;
+      }
+      llvm::Value *RStr = R;
+      if (!RIsString) {
+        if (RTy->isDoubleTy())
+          RStr = GenerateFtoa(R);
+        else
+          RStr = GenerateItoa(EmitCast(R, llvm::Type::getInt32Ty(*TheContext)))
+                     .first;
+      }
+      return GenerateStrCat(LStr, RStr);
+    }
+
+    if (LTy->isDoubleTy() || RTy->isDoubleTy()) {
+      return TheBuilder->CreateFAdd(
+          EmitCast(L, llvm::Type::getDoubleTy(*TheContext)),
+          EmitCast(R, llvm::Type::getDoubleTy(*TheContext)), "addtmp");
+    }
+    return TheBuilder->CreateAdd(L, R, "addtmp");
   }
 
-  if (L->getType()->isPointerTy() || R->getType()->isPointerTy()) {
-    std::string ErrMsg = "Type Error: Cannot apply operator '";
-    ErrMsg += Op;
-    ErrMsg += "' to a string.";
-    return LogErrorV(ErrMsg.c_str());
+  if ((LIsPtr || RIsPtr) && Op != '+') {
+    return LogErrorV(
+        "Type Error: Cannot perform non-addition math on pointers/strings.");
   }
 
-  llvm::Type *CommonTy = L->getType();
-  if (R->getType()->isDoubleTy())
-    CommonTy = R->getType();
+  llvm::Type *CommonTy = LTy;
+  if (RTy->isDoubleTy()) {
+    CommonTy = RTy;
+  } else if (LTy->isIntegerTy() && RTy->isIntegerTy()) {
+    if (RTy->getIntegerBitWidth() > LTy->getIntegerBitWidth())
+      CommonTy = RTy;
+  }
 
   L = EmitCast(L, CommonTy);
   R = EmitCast(R, CommonTy);
-
   bool isDouble = CommonTy->isDoubleTy();
+  bool useIntegerCompare = LTy->isIntegerTy() || LTy->isPointerTy();
 
   switch (Op) {
   case '+':
@@ -647,19 +689,57 @@ llvm::Value *BinaryExprAST::codegen() {
   case '*':
     return isDouble ? TheBuilder->CreateFMul(L, R, "multmp")
                     : TheBuilder->CreateMul(L, R, "multmp");
+  case tok_neq:
+    L = useIntegerCompare ? TheBuilder->CreateICmpNE(L, R, "cmptmp")
+                          : TheBuilder->CreateFCmpONE(L, R, "cmptmp");
+    return isDouble ? TheBuilder->CreateUIToFP(
+                          L, llvm::Type::getDoubleTy(*TheContext), "booltmp")
+                    : TheBuilder->CreateZExt(
+                          L, llvm::Type::getInt32Ty(*TheContext), "booltmp");
   case '<':
-    if (isDouble) {
-      L = TheBuilder->CreateFCmpULT(L, R, "cmptmp");
-      return TheBuilder->CreateUIToFP(L, llvm::Type::getDoubleTy(*TheContext),
-                                      "booltmp");
-    } else {
-      L = TheBuilder->CreateICmpSLT(L, R, "cmptmp");
-      return TheBuilder->CreateZExt(L, llvm::Type::getInt32Ty(*TheContext),
-                                    "booltmp");
-    }
+    L = isDouble ? TheBuilder->CreateFCmpULT(L, R, "cmptmp")
+                 : TheBuilder->CreateICmpSLT(L, R, "cmptmp");
+    return isDouble ? TheBuilder->CreateUIToFP(
+                          L, llvm::Type::getDoubleTy(*TheContext), "booltmp")
+                    : TheBuilder->CreateZExt(
+                          L, llvm::Type::getInt32Ty(*TheContext), "booltmp");
   default:
-    return nullptr;
+    return LogErrorV("Unknown binary operator");
   }
+}
+
+llvm::Value *WhileExprAST::codegen() {
+  llvm::Function *TheFunction = TheBuilder->GetInsertBlock()->getParent();
+  llvm::BasicBlock *CondBB =
+      llvm::BasicBlock::Create(*TheContext, "whilecond", TheFunction);
+  llvm::BasicBlock *LoopBB =
+      llvm::BasicBlock::Create(*TheContext, "whileloop", TheFunction);
+  llvm::BasicBlock *AfterBB =
+      llvm::BasicBlock::Create(*TheContext, "whileafter", TheFunction);
+
+  TheBuilder->CreateBr(CondBB);
+  TheBuilder->SetInsertPoint(CondBB);
+  llvm::Value *CondV = Cond->codegen();
+  if (!CondV)
+    return nullptr;
+
+  if (CondV->getType()->isIntegerTy()) {
+    CondV = TheBuilder->CreateICmpNE(
+        CondV, llvm::ConstantInt::get(CondV->getType(), 0), "loopcond");
+  } else {
+    CondV = TheBuilder->CreateFCmpONE(
+        CondV, llvm::ConstantFP::get(*TheContext, llvm::APFloat(0.0)),
+        "loopcond");
+  }
+  TheBuilder->CreateCondBr(CondV, LoopBB, AfterBB);
+
+  TheBuilder->SetInsertPoint(LoopBB);
+  if (!Body->codegen())
+    return nullptr;
+  TheBuilder->CreateBr(CondBB);
+
+  TheBuilder->SetInsertPoint(AfterBB);
+  return llvm::Constant::getNullValue(llvm::Type::getDoubleTy(*TheContext));
 }
 
 MyType MemberAccessExprAST::getType() {
@@ -711,8 +791,19 @@ llvm::Value *NumberExprAST::codegen() {
 }
 
 llvm::Value *StringExprAST::codegen() {
-  std::string LetHimCook = ProcessEscapeSequences(Val);
-  return TheBuilder->CreateGlobalString(LetHimCook);
+  llvm::Constant *StrConstant = llvm::ConstantDataArray::getString(
+      *TheContext, ProcessEscapeSequences(Val), true);
+
+  llvm::GlobalVariable *GV = new llvm::GlobalVariable(
+      *TheModule, StrConstant->getType(), true,
+      llvm::GlobalValue::PrivateLinkage, StrConstant, ".str");
+
+  GV->setAlignment(llvm::MaybeAlign(1));
+
+  llvm::Value *Zero =
+      llvm::ConstantInt::get(llvm::Type::getInt32Ty(*TheContext), 0);
+  return TheBuilder->CreateInBoundsGEP(GV->getValueType(), GV, {Zero, Zero},
+                                       "strptr");
 }
 
 llvm::Value *GlobalVarAST::codegen() {
@@ -727,6 +818,7 @@ llvm::Value *GlobalVarAST::codegen() {
   auto *GV = new llvm::GlobalVariable(*TheModule, Type, false,
                                       llvm::GlobalValue::ExternalLinkage,
                                       Initializer, Name);
+  GlobalValues[Name] = {GV, Ty};
   return GV;
 }
 
@@ -835,6 +927,7 @@ MyType CallExprAST::getType() {
 
 llvm::Value *CallExprAST::codegen() {
   DEBUG_MSG("Calling function: " << Callee);
+
   if (Callee == "print") {
     llvm::Value *LastSyscallResult = nullptr;
 
@@ -862,7 +955,7 @@ llvm::Value *CallExprAST::codegen() {
         GeneratePrintDouble(ArgV);
         LastSyscallResult =
             llvm::ConstantInt::get(llvm::Type::getInt64Ty(*TheContext), 0);
-        if (isTemporary && ArgV->getType()->isPointerTy()) {
+        if (!EmitObject && isTemporary && ArgV->getType()->isPointerTy()) {
           TheBuilder->CreateCall(GetFree(), {ArgV});
         }
       }
